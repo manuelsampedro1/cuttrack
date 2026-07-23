@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090a0d">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.hevyapp.com; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://shfpsrniibhbxmrjnhze.supabase.co; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="CutTrack">
@@ -22,6 +22,7 @@
       <div>
         <div class="brand"><span aria-hidden="true">🥩</span> cuttrack</div>
         <p id="header-subtitle">Tu progreso, sin ruido.</p>
+        <p class="cloud-status" id="cloud-status">Comprobando tu cuenta…</p>
       </div>
       <button class="goal-pill" id="install-button" type="button" aria-label="Instalar CutTrack">
         <span id="header-goal">15%</span>
@@ -147,8 +148,8 @@
           </article>
 
           <article class="card form-card">
-            <h2>Apple Salud, opcional</h2>
-            <p class="form-help">Copia el gasto activo y basal. Juntos dan el gasto usado para el déficit de ese día.</p>
+          <h2>Apple Salud</h2>
+          <p class="form-help">La app del iPhone sincroniza estos valores. También puedes corregirlos manualmente si todavía no ha llegado el dato.</p>
             <div class="field-grid">
               <label>Energía activa<input name="activeEnergy" inputmode="decimal" type="number" min="0" max="10000" placeholder="650"></label>
               <label>Energía basal<input name="basalEnergy" inputmode="decimal" type="number" min="0" max="10000" placeholder="1950"></label>
@@ -166,7 +167,7 @@
         <div class="page-title">
           <p class="eyebrow">TU MODELO</p>
           <h1>Ajustes</h1>
-          <p>Todo se guarda localmente en este dispositivo.</p>
+          <p>Tu cuenta conserva los datos y este dispositivo mantiene una copia para usarla sin conexión.</p>
         </div>
 
         <form id="settings-form">
@@ -191,26 +192,31 @@
           <button class="primary-button" type="submit">Guardar ajustes</button>
         </form>
 
-        <article class="card integration-card">
-          <div class="integration-heading"><span aria-hidden="true">🏋️</span><div><h2>Hevy</h2><p>Sincroniza entrenamientos terminados.</p></div></div>
-          <label>API key de Hevy<input id="hevy-key" type="password" autocomplete="off" placeholder="Solo vive durante esta sesión"></label>
-          <button class="secondary-button" id="sync-hevy" type="button">Sincronizar ahora</button>
-          <p class="form-help" id="hevy-status">La clave no se guarda en GitHub ni en el almacenamiento permanente.</p>
+        <article class="card integration-card account-card">
+          <div class="integration-heading"><span aria-hidden="true">☁</span><div><h2>Tu cuenta</h2><p id="account-email">Sesión no iniciada</p></div></div>
+          <div class="sync-row"><span id="account-sync-status">Comprobando sincronización…</span><strong id="pending-count">0 pendientes</strong></div>
+          <button class="secondary-button" id="sync-cloud" type="button">Sincronizar ahora</button>
+          <button class="text-button" id="sign-out" type="button">Cerrar sesión</button>
         </article>
 
         <article class="card integration-card">
-          <div class="integration-heading"><span aria-hidden="true">↕</span><div><h2>Datos</h2><p>Copia de seguridad y traslado entre dispositivos.</p></div></div>
+          <div class="integration-heading"><span aria-hidden="true">♥</span><div><h2>Puente del iPhone</h2><p>Apple Salud y entrenamientos de Hevy.</p></div></div>
+          <p class="form-help" id="health-sync-status">La app nativa de CutTrack sube Salud y Hevy a esta misma cuenta. Las claves privadas se quedan en Keychain. iOS decide cuándo permite la sincronización en segundo plano.</p>
+        </article>
+
+        <article class="card integration-card">
+          <div class="integration-heading"><span aria-hidden="true">↕</span><div><h2>Datos</h2><p>Copia adicional para guardar donde quieras.</p></div></div>
           <div class="button-row">
             <button class="secondary-button" id="export-data" type="button">Exportar</button>
             <label class="secondary-button file-button">Importar<input id="import-data" type="file" accept="application/json"></label>
           </div>
-          <p class="form-help">GitHub Pages no recibe estos datos. El archivo exportado sí contiene información de salud, guárdalo con cuidado.</p>
+          <p class="form-help">La nube es la copia principal. El archivo exportado también contiene información de salud, guárdalo con cuidado.</p>
         </article>
 
         <article class="card danger-zone">
-          <h2>Borrar CutTrack</h2>
-          <p>Elimina ajustes, registros y entrenamientos guardados en este dispositivo.</p>
-          <button class="text-button danger" id="reset-data" type="button">Borrar todos mis datos</button>
+          <h2>Caché de este dispositivo</h2>
+          <p>Elimina la copia local. Al volver a entrar, CutTrack descargará tus datos de la nube.</p>
+          <button class="text-button danger" id="reset-data" type="button">Borrar copia local</button>
         </article>
       </section>
     </main>
@@ -225,12 +231,27 @@
     </nav>
   </div>
 
+  <dialog id="auth-dialog" class="sheet auth-sheet">
+    <form id="auth-form">
+      <div class="sheet-handle"></div>
+      <p class="eyebrow">TU CUENTA CUTTRACK</p>
+      <h1>Tu historial, siempre contigo</h1>
+      <p>Entra para guardar todo en la nube y ver en la web lo que sincronice Apple Salud desde tu iPhone.</p>
+      <label>Email<input name="email" type="email" autocomplete="email" required placeholder="tu@email.com"></label>
+      <label>Contraseña<input name="password" type="password" minlength="8" autocomplete="current-password" required placeholder="8 caracteres o más"></label>
+      <p class="auth-message" id="auth-message" role="status"></p>
+      <button class="primary-button" id="sign-in" type="submit">Entrar</button>
+      <button class="secondary-button" id="sign-up" type="button">Crear cuenta</button>
+      <p class="form-help">La contraseña la gestiona el servicio de autenticación. CutTrack no la incluye en tus registros ni en GitHub.</p>
+    </form>
+  </dialog>
+
   <dialog id="onboarding-dialog" class="sheet onboarding-sheet">
     <form method="dialog" id="onboarding-form">
       <div class="sheet-handle"></div>
       <p class="eyebrow">CONFIGURACIÓN PRIVADA</p>
       <h1>Hazlo tuyo</h1>
-      <p>Estos valores se quedan en este iPhone. No se publican ni se envían a GitHub.</p>
+      <p>Estos valores se guardan en tu cuenta privada y se copian en este iPhone para funcionar sin conexión.</p>
       <div class="field-grid">
         <label>Peso actual, kg<input name="currentWeight" type="number" min="30" max="300" step="0.1" placeholder="80,0" required></label>
         <label>Grasa actual, %<input name="currentBodyFat" type="number" min="3" max="70" step="0.1" placeholder="20" required></label>

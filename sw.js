@@ -1,9 +1,11 @@
-const CACHE_NAME = "cuttrack-v1";
+const CACHE_NAME = "cuttrack-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./cloud.js",
+  "./config.js",
   "./stats.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
@@ -32,4 +34,3 @@ self.addEventListener("fetch", event => {
       .catch(() => caches.match(event.request).then(cached => cached || caches.match("./index.html")))
   );
 });
-

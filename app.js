@@ -12,8 +12,10 @@ import {
   safeNumber,
   sortEntries
 } from "./stats.js";
+import { cloud } from "./cloud.js";
 
-const STORAGE_KEY = "cuttrack.v1";
+const LEGACY_STORAGE_KEY = "cuttrack.v1";
+const STORAGE_KEY = "cuttrack.cache.v1";
 const defaultState = {
   version: 1,
   configured: false,
@@ -31,6 +33,7 @@ const defaultState = {
 
 let state = loadState();
 let deferredInstallPrompt = null;
+let cloudSyncPromise = null;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -38,9 +41,13 @@ const formatNumber = (value, digits = 0) => Number(value).toLocaleString("es-ES"
 const formatDate = date => new Intl.DateTimeFormat("es-ES", { day: "numeric", month: "short", year: "numeric" }).format(date);
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-function loadState() {
+function storageKey() {
+  return cloud.user?.id ? `${STORAGE_KEY}.${cloud.user.id}` : null;
+}
+
+function parseState(raw) {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const stored = JSON.parse(raw);
     if (!stored || stored.version !== 1) return structuredClone(defaultState);
     return {
       ...structuredClone(defaultState),
@@ -54,8 +61,19 @@ function loadState() {
   }
 }
 
+function loadState() {
+  const key = storageKey();
+  if (!key) return structuredClone(defaultState);
+  const scoped = localStorage.getItem(key);
+  if (scoped) return parseState(scoped);
+  return parseState(localStorage.getItem(LEGACY_STORAGE_KEY));
+}
+
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const key = storageKey();
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify(state));
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
 }
 
 function currentModel() {
@@ -319,7 +337,104 @@ function showToast(message) {
   showToast.timer = setTimeout(() => toast.classList.remove("visible"), 2600);
 }
 
-function seedDemo() {
+function updateAccountUI() {
+  const email = cloud.user?.email || "Sesión no iniciada";
+  $("#account-email").textContent = email;
+  $("#pending-count").textContent = `${cloud.pendingCount} pendiente${cloud.pendingCount === 1 ? "" : "s"}`;
+}
+
+function updateCloudStatus({ status, detail = "", pending = cloud.pendingCount }) {
+  const labels = {
+    online: pending ? `${pending} cambios pendientes` : "Guardado en tu cuenta",
+    syncing: "Sincronizando…",
+    pending: `${pending} cambios pendientes`,
+    offline: "Sin conexión, cambios guardados aquí",
+    error: "No se pudo sincronizar",
+    "signed-out": "Inicia sesión"
+  };
+  const text = labels[status] ?? detail ?? "";
+  $("#cloud-status").textContent = text;
+  $("#cloud-status").className = `cloud-status ${status}`;
+  $("#account-sync-status").textContent = detail || text;
+  updateAccountUI();
+  if (status === "signed-out") {
+    state = structuredClone(defaultState);
+    renderEntryForm(todayISO());
+    renderAll();
+  }
+}
+
+async function uploadCurrentState() {
+  await cloud.mutate("profile-upsert", state.settings);
+  for (const entry of state.entries) await cloud.mutate("entry-upsert", entry);
+}
+
+async function syncCloud({ quiet = false } = {}) {
+  if (!cloud.isSignedIn) {
+    showAuthDialog();
+    return null;
+  }
+  if (cloudSyncPromise) return cloudSyncPromise;
+  cloudSyncPromise = (async () => {
+    try {
+      const remote = await cloud.sync(state, defaultState);
+      if (remote) {
+        state = remote;
+        saveState();
+        renderEntryForm($("#entry-date").value || todayISO());
+        renderAll();
+      }
+      if (!quiet) showToast("Todo sincronizado.");
+      return remote;
+    } catch (error) {
+      if (!quiet) showToast(error.message);
+      if (!cloud.isSignedIn) showAuthDialog();
+      return null;
+    } finally {
+      cloudSyncPromise = null;
+      updateAccountUI();
+    }
+  })();
+  return cloudSyncPromise;
+}
+
+function showAuthDialog() {
+  const dialog = $("#auth-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeAuthDialog() {
+  const dialog = $("#auth-dialog");
+  if (dialog.open) dialog.close();
+  $("#auth-message").textContent = "";
+}
+
+async function completeSignIn() {
+  closeAuthDialog();
+  state = loadState();
+  renderEntryForm($("#entry-date").value || todayISO());
+  renderAll();
+  updateAccountUI();
+  const remote = await syncCloud({ quiet: true });
+  if (!cloud.isSignedIn) {
+    showAuthDialog();
+    return;
+  }
+  if (!remote?.configured && !state.configured) $("#onboarding-dialog").showModal();
+}
+
+async function initializeCloud() {
+  cloud.subscribe(updateCloudStatus);
+  updateAccountUI();
+  if (!cloud.isSignedIn) {
+    updateCloudStatus({ status: "signed-out", detail: "Tu cuenta protege el historial" });
+    showAuthDialog();
+    return;
+  }
+  await completeSignIn();
+}
+
+async function seedDemo() {
   const entries = [];
   const weights = [82.5, 82.4, 82.2, 82.3, 82.0, 81.9, 81.8, 81.7, 81.6, 81.7, 81.4, 81.3, 81.2, 81.1];
   const calories = [1840, 1970, 1760, 2080, 1890, 1920, 1810, 1730, 2010, 1880, 1790, 1940, 1860, 1750];
@@ -339,47 +454,11 @@ function seedDemo() {
     workouts: [{ id: "demo-1", title: "Upper Strength", start_time: new Date(Date.now() - 86400000).toISOString(), end_time: new Date(Date.now() - 86400000 + 72 * 60000).toISOString(), exercises: [{ sets: Array(22).fill({}) }] }]
   };
   saveState();
+  if (cloud.isSignedIn) await uploadCurrentState();
   $("#onboarding-dialog").close();
   renderEntryForm();
   renderAll();
   showToast("Demo cargada. Puedes borrar los datos en Ajustes.");
-}
-
-async function syncHevy() {
-  const key = $("#hevy-key").value.trim();
-  if (!key) return showToast("Introduce tu API key de Hevy.");
-  const button = $("#sync-hevy");
-  button.disabled = true;
-  button.textContent = "Sincronizando…";
-  $("#hevy-status").textContent = "Descargando entrenamientos. La clave no se guardará.";
-  try {
-    const workouts = [];
-    let page = 1;
-    while (page <= 20) {
-      const response = await fetch(`https://api.hevyapp.com/v1/workouts?page=${page}&pageSize=10`, { headers: { "api-key": key } });
-      if (!response.ok) throw new Error(response.status === 401 ? "Clave no válida" : `Hevy respondió ${response.status}`);
-      const payload = await response.json();
-      const batch = Array.isArray(payload) ? payload : payload.workouts ?? payload.data ?? [];
-      workouts.push(...batch);
-      const pageCount = payload.page_count ?? payload.pageCount;
-      if (!batch.length || batch.length < 10 || (pageCount && page >= pageCount)) break;
-      page += 1;
-    }
-    const byID = new Map(state.workouts.map(workout => [workout.id, workout]));
-    workouts.forEach(workout => byID.set(workout.id, workout));
-    state.workouts = [...byID.values()];
-    saveState();
-    renderProgress();
-    $("#hevy-key").value = "";
-    $("#hevy-status").textContent = `${workouts.length} entrenamientos recibidos. La clave se ha retirado del campo.`;
-    showToast("Hevy sincronizado.");
-  } catch (error) {
-    $("#hevy-status").textContent = error.message;
-    showToast(`No se pudo sincronizar: ${error.message}`);
-  } finally {
-    button.disabled = false;
-    button.textContent = "Sincronizar ahora";
-  }
 }
 
 function exportData() {
@@ -398,6 +477,7 @@ async function importData(file) {
     if (imported.version !== 1 || !Array.isArray(imported.entries) || !imported.settings) throw new Error("Archivo incompatible");
     state = { ...structuredClone(defaultState), ...imported, settings: { ...defaultState.settings, ...imported.settings } };
     saveState();
+    if (cloud.isSignedIn) await uploadCurrentState();
     renderEntryForm();
     renderAll();
     showToast("Datos importados.");
@@ -410,7 +490,7 @@ function bindEvents() {
   $$(".tabbar button").forEach(button => button.addEventListener("click", () => navigate(button.dataset.target)));
   $("#quick-add").addEventListener("click", () => navigate("log"));
   $("#entry-date").addEventListener("change", event => renderEntryForm(event.target.value));
-  $("#daily-form").addEventListener("submit", event => {
+  $("#daily-form").addEventListener("submit", async event => {
     event.preventDefault();
     const form = event.currentTarget;
     const entry = { date: form.elements.date.value, ...formNumbers(form, ["calories", "protein", "weight", "bodyFat", "activeEnergy", "basalEnergy", "steps", "sleep"]) };
@@ -419,46 +499,97 @@ function bindEvents() {
     if (entry.weight) state.settings.currentWeight = entry.weight;
     if (entry.bodyFat) state.settings.currentBodyFat = entry.bodyFat;
     saveState();
+    const cloudSaved = await cloud.mutate("entry-upsert", entry);
     renderAll();
     navigate("today");
-    showToast("Día guardado.");
+    showToast(cloudSaved ? "Día guardado en tu cuenta." : "Día guardado aquí. Se subirá al recuperar conexión.");
   });
-  $("#delete-entry").addEventListener("click", () => {
+  $("#delete-entry").addEventListener("click", async () => {
     const date = $("#entry-date").value;
     if (!confirm(`¿Eliminar el registro del ${date}?`)) return;
     state.entries = state.entries.filter(entry => entry.date !== date);
     saveState();
+    await cloud.mutate("entry-delete", date);
     renderEntryForm(date);
     renderAll();
     showToast("Registro eliminado.");
   });
-  $("#settings-form").addEventListener("submit", event => {
+  $("#settings-form").addEventListener("submit", async event => {
     event.preventDefault();
     state.settings = { ...state.settings, ...formNumbers(event.currentTarget, ["calorieTarget", "proteinTarget", "tdeeEstimate", "mainBodyFatTarget", "currentWeight", "currentBodyFat"]) };
     state.configured = true;
     saveState();
+    const cloudSaved = await cloud.mutate("profile-upsert", state.settings);
     renderAll();
-    showToast("Ajustes guardados.");
+    showToast(cloudSaved ? "Ajustes guardados en tu cuenta." : "Ajustes pendientes de sincronizar.");
   });
-  $("#onboarding-form").addEventListener("submit", event => {
+  $("#onboarding-form").addEventListener("submit", async event => {
     event.preventDefault();
     state.settings = { ...state.settings, ...formNumbers(event.currentTarget, ["calorieTarget", "proteinTarget", "tdeeEstimate", "mainBodyFatTarget", "currentWeight", "currentBodyFat"]) };
     state.configured = true;
     saveState();
+    await cloud.mutate("profile-upsert", state.settings);
     $("#onboarding-dialog").close();
     renderAll();
   });
   $("#load-demo").addEventListener("click", seedDemo);
-  $("#sync-hevy").addEventListener("click", syncHevy);
   $("#export-data").addEventListener("click", exportData);
   $("#import-data").addEventListener("change", event => event.target.files[0] && importData(event.target.files[0]));
-  $("#reset-data").addEventListener("click", () => {
-    if (!confirm("¿Borrar todos los datos locales de CutTrack? Esta acción no se puede deshacer.")) return;
-    localStorage.removeItem(STORAGE_KEY);
+  $("#reset-data").addEventListener("click", async () => {
+    if (!confirm("¿Borrar la copia local de CutTrack? Los datos de tu cuenta seguirán en la nube.")) return;
+    const key = storageKey();
+    if (key) localStorage.removeItem(key);
     state = structuredClone(defaultState);
     renderEntryForm();
     renderAll();
-    $("#onboarding-dialog").showModal();
+    await syncCloud({ quiet: true });
+    showToast("Copia local renovada desde tu cuenta.");
+  });
+  $("#sync-cloud").addEventListener("click", () => syncCloud());
+  $("#sign-out").addEventListener("click", async () => {
+    await cloud.signOut();
+    state = structuredClone(defaultState);
+    renderEntryForm(todayISO());
+    renderAll();
+    updateAccountUI();
+    showAuthDialog();
+  });
+  $("#auth-dialog").addEventListener("cancel", event => event.preventDefault());
+  $("#auth-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = $("#sign-in");
+    button.disabled = true;
+    $("#auth-message").textContent = "Entrando…";
+    try {
+      await cloud.signIn(form.elements.email.value.trim(), form.elements.password.value);
+      form.elements.password.value = "";
+      await completeSignIn();
+    } catch (error) {
+      $("#auth-message").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#sign-up").addEventListener("click", async () => {
+    const form = $("#auth-form");
+    if (!form.reportValidity()) return;
+    const button = $("#sign-up");
+    button.disabled = true;
+    $("#auth-message").textContent = "Creando tu cuenta…";
+    try {
+      const result = await cloud.signUp(form.elements.email.value.trim(), form.elements.password.value);
+      form.elements.password.value = "";
+      if (result.confirmationRequired) {
+        $("#auth-message").textContent = "Revisa tu email y confirma la cuenta. Después vuelve aquí y entra.";
+      } else {
+        await completeSignIn();
+      }
+    } catch (error) {
+      $("#auth-message").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
   });
   $$("[data-dialog]").forEach(button => button.addEventListener("click", () => $(`#${button.dataset.dialog}`).showModal()));
   $$(".close-dialog").forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
@@ -472,6 +603,8 @@ function bindEvents() {
     }
   });
   window.addEventListener("beforeinstallprompt", event => { event.preventDefault(); deferredInstallPrompt = event; });
+  window.addEventListener("online", () => syncCloud({ quiet: true }));
+  window.addEventListener("offline", () => updateCloudStatus({ status: "offline", detail: "Sin conexión" }));
 }
 
 function registerServiceWorker() {
@@ -482,8 +615,4 @@ bindEvents();
 renderEntryForm();
 renderAll();
 registerServiceWorker();
-if (!state.configured && new URLSearchParams(location.search).get("demo") === "1") {
-  seedDemo();
-} else if (!state.configured) {
-  $("#onboarding-dialog").showModal();
-}
+initializeCloud();
