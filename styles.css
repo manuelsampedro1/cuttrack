@@ -190,6 +190,11 @@ textarea::placeholder { color: #666a74; }
 .integration-details summary { cursor: pointer; color: var(--text); font-weight: 750; }
 .integration-details p { margin: 10px 0 2px; }
 .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sync-hub { gap: 16px; }
+.sync-provider { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.sync-provider-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sync-provider-title strong { font-size: 15px; }
+.sync-provider-title span { color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .7px; }
 .sync-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
 .sync-row strong { color: var(--green); font-size: 11px; white-space: nowrap; }
 .file-button { display: grid; place-items: center; }
@@ -228,12 +233,43 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); backdrop-filter: blur(5px); }
 .capture-preview img { width: 100%; height: 100%; object-fit: cover; }
 .preview-remove { position: absolute; top: 9px; right: 9px; width: 34px; height: 34px; border: 0; border-radius: 50%; background: rgba(10, 10, 12, .75); color: white; font-size: 24px; }
 .capture-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.capture-tip { display: grid; gap: 3px; padding: 12px 13px; border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line)); border-radius: 16px; background: color-mix(in srgb, var(--green) 6%, #101216); }
+.capture-tip strong { color: var(--green); font-size: 11px; }
+.capture-tip span { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .analysis-status { min-height: 18px; margin: 0 !important; color: var(--green) !important; font-size: 12px !important; }
 .analyze-button { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .spinner { width: 17px; height: 17px; border: 2px solid rgba(7, 18, 10, .25); border-top-color: #07120a; border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; }
 .nutrient-edit-grid { margin: 4px 0; }
+.food-review-sheet { max-height: min(94vh, 940px); }
+.review-photo { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 21px; background: #0d0f12; }
+.review-photo > img { display: block; width: 100%; height: auto; }
+.review-boxes { position: absolute; inset: 0; pointer-events: none; }
+.review-box { position: absolute; border: 2px solid var(--green); border-radius: 9px; background: color-mix(in srgb, var(--green) 7%, transparent); box-shadow: 0 0 0 1px rgba(0, 0, 0, .4); }
+.review-box span { position: absolute; left: -7px; top: -11px; width: 23px; height: 23px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: #07120a; font-size: 11px; font-weight: 900; }
+.reference-result { display: flex; gap: 9px; align-items: start; padding: 11px 12px; border: 1px solid var(--line); border-radius: 15px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.reference-result.detected { border-color: color-mix(in srgb, var(--green) 35%, var(--line)); color: #cdd5d0; }
+.reference-result strong { color: var(--green); white-space: nowrap; }
+.review-total { padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; }
+.review-total > div { display: grid; gap: 3px; }
+.review-total span { color: var(--muted); font-size: 10px; }
+.review-total strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+.review-total > div:first-child strong { color: var(--green); }
+.review-total small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+.food-component-list { display: grid; gap: 10px; }
+.food-component { padding: 13px; border: 1px solid var(--line); border-radius: 19px; background: #121419; display: grid; gap: 11px; }
+.food-component-head { display: grid; grid-template-columns: 28px minmax(0, 1fr) 36px; gap: 8px; align-items: center; }
+.food-component-index { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: #07120a; background: var(--green); font-size: 11px; font-weight: 900; }
+.food-component-name { min-height: 40px; padding: 9px 10px; border-radius: 11px; font-size: 14px; font-weight: 750; }
+.food-component-delete { width: 36px; height: 36px; border: 0; border-radius: 11px; color: var(--coral); background: color-mix(in srgb, var(--coral) 10%, transparent); font-size: 20px; }
+.food-component-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.food-component-fields label { gap: 4px; font-size: 9px; }
+.food-component-fields input { min-height: 40px; padding: 9px 10px; border-radius: 11px; font-size: 14px; }
+.food-component-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.confidence-pill { flex: 0 0 auto; color: #f5c66b; font-weight: 800; }
+.add-food-component { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; padding-top: 4px; }
+.add-food-component .secondary-button { min-height: 48px; }
 button:disabled { opacity: .55; cursor: wait; }
 
 @media (min-width: 560px) {
@@ -251,6 +287,7 @@ button:disabled { opacity: .55; cursor: wait; }
   .deficit-ring { width: 88px; height: 88px; flex-basis: 88px; }
   .field-grid { grid-template-columns: 1fr; }
   .projection-copy { grid-template-columns: 1fr; }
+  .add-food-component { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

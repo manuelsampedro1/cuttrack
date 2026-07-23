@@ -189,6 +189,23 @@ export class CutTrackCloud {
     if (!response.ok && response.status !== 404) throw new Error("No se pudo borrar la foto");
   }
 
+  async foodImageURL(path) {
+    if (!path) return null;
+    await this.ensureSession();
+    const response = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/food-images/${path}`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${this.session.access_token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ expiresIn: 600 })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.signedURL) return null;
+    return `${SUPABASE_URL}/storage/v1${payload.signedURL}`;
+  }
+
   profileRow(settings) {
     return {
       user_id: this.user.id,
@@ -274,6 +291,10 @@ export class CutTrackCloud {
         input_text: payload.inputText,
         image_path: payload.imagePath,
         assumptions: payload.assumptions ?? [],
+        items: payload.items ?? [],
+        calories_low: payload.caloriesLow ?? payload.calories,
+        calories_high: payload.caloriesHigh ?? payload.calories,
+        reference_object: payload.referenceObject ?? {},
         client_updated_at: payload.clientUpdatedAt ?? new Date().toISOString()
       } } });
     }
@@ -375,6 +396,10 @@ export class CutTrackCloud {
         inputText: row.input_text,
         imagePath: row.image_path,
         assumptions: row.assumptions ?? [],
+        items: row.items ?? [],
+        caloriesLow: row.calories_low === null ? Number(row.calories) : Number(row.calories_low),
+        caloriesHigh: row.calories_high === null ? Number(row.calories) : Number(row.calories_high),
+        referenceObject: row.reference_object ?? {},
         clientUpdatedAt: row.client_updated_at
       })),
       workouts: (workouts ?? []).map(row => row.payload && Object.keys(row.payload).length ? row.payload : ({

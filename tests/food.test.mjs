@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { localDay, normalizeFoodAnalysis, totalsForDay } from "../food.js";
+import { localDay, normalizeFoodAnalysis, totalsForDay, totalsForFoodItems } from "../food.js";
 
 test("normaliza la respuesta nutricional estructurada", () => {
   const result = normalizeFoodAnalysis({
@@ -10,13 +10,40 @@ test("normaliza la respuesta nutricional estructurada", () => {
     protein: 3,
     carbohydrates: 32.26,
     fat: 0,
+    calories_low: 390,
+    calories_high: 470,
     confidence: 0.93,
     meal: "snack",
-    assumptions: ["Amstel Original"]
+    assumptions: ["Amstel Original"],
+    reference_object: { detected: false },
+    items: [{
+      name: "Cerveza Amstel",
+      estimated_weight_g: 990,
+      calories: 429.04,
+      calories_low: 390,
+      calories_high: 470,
+      protein: 3,
+      carbohydrates: 32.26,
+      fat: 0,
+      confidence: 0.93,
+      portion_basis: "3 botellas de 330 ml",
+      box_2d: []
+    }]
   });
   assert.equal(result.calories, 429);
   assert.equal(result.carbohydrates, 32.3);
   assert.equal(result.amountDescription, "3 botellas de 330 ml");
+  assert.equal(result.items.length, 1);
+  assert.equal(result.caloriesLow, 390);
+  assert.equal(result.caloriesHigh, 470);
+});
+
+test("suma componentes y conserva sus rangos", () => {
+  const totals = totalsForFoodItems([
+    { calories: 350, protein: 40, carbohydrates: 20, fat: 12 },
+    { calories: 220, protein: 4, carbohydrates: 42, fat: 4 }
+  ]);
+  assert.deepEqual(totals, { calories: 570, protein: 44, carbohydrates: 62, fat: 16 });
 });
 
 test("suma todas las comidas del mismo día", () => {

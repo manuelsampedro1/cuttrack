@@ -1,4 +1,4 @@
-const CACHE_NAME = "cuttrack-v5";
+const CACHE_NAME = "cuttrack-v6";
 const APP_SHELL = [
   "./",
   "./index.html",

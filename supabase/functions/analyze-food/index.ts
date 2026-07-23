@@ -13,9 +13,55 @@ const schema = {
     protein: { type: "NUMBER" },
     carbohydrates: { type: "NUMBER" },
     fat: { type: "NUMBER" },
+    calories_low: { type: "NUMBER" },
+    calories_high: { type: "NUMBER" },
     confidence: { type: "NUMBER" },
     meal: { type: "STRING", enum: ["breakfast", "lunch", "dinner", "snack"] },
     assumptions: { type: "ARRAY", items: { type: "STRING" } },
+    reference_object: {
+      type: "OBJECT",
+      properties: {
+        detected: { type: "BOOLEAN" },
+        object: { type: "STRING" },
+        assumed_width_mm: { type: "NUMBER" },
+        assumed_height_mm: { type: "NUMBER" },
+        confidence: { type: "NUMBER" },
+        same_plane: { type: "BOOLEAN" },
+      },
+      required: ["detected", "object", "assumed_width_mm", "assumed_height_mm", "confidence", "same_plane"],
+    },
+    items: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          estimated_weight_g: { type: "NUMBER" },
+          calories: { type: "NUMBER" },
+          calories_low: { type: "NUMBER" },
+          calories_high: { type: "NUMBER" },
+          protein: { type: "NUMBER" },
+          carbohydrates: { type: "NUMBER" },
+          fat: { type: "NUMBER" },
+          confidence: { type: "NUMBER" },
+          portion_basis: { type: "STRING" },
+          box_2d: { type: "ARRAY", items: { type: "INTEGER" } },
+        },
+        required: [
+          "name",
+          "estimated_weight_g",
+          "calories",
+          "calories_low",
+          "calories_high",
+          "protein",
+          "carbohydrates",
+          "fat",
+          "confidence",
+          "portion_basis",
+          "box_2d",
+        ],
+      },
+    },
   },
   required: [
     "name",
@@ -24,9 +70,13 @@ const schema = {
     "protein",
     "carbohydrates",
     "fat",
+    "calories_low",
+    "calories_high",
     "confidence",
     "meal",
     "assumptions",
+    "reference_object",
+    "items",
   ],
 };
 
@@ -50,6 +100,14 @@ function finite(value: unknown, minimum: number, maximum: number) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < minimum || number > maximum) throw new Error("invalid nutrition value");
   return Math.round(number * 10) / 10;
+}
+
+function normalizedBox(value: unknown) {
+  if (!Array.isArray(value) || value.length !== 4) return [];
+  const output = value.map((item) => Math.round(Number(item)));
+  if (output.some((item) => !Number.isFinite(item) || item < 0 || item > 1000)) return [];
+  if (output[2] <= output[0] || output[3] <= output[1]) return [];
+  return output;
 }
 
 Deno.serve(async (request) => {
@@ -101,17 +159,26 @@ Deno.serve(async (request) => {
   }
 
   const prompt = `
-Eres el motor de registro nutricional de una app personal española. Analiza la foto y/o el texto del usuario y devuelve una sola estimación total para todo lo consumido.
+Eres el motor de visión y registro nutricional de una app personal española. Tu trabajo es separar cada alimento o bebida, estimar su porción y devolver un plato editable.
 
 Reglas:
 - Interpreta lenguaje cotidiano, cantidades y marcas españolas. Por ejemplo, "tres tercios Amstel" significa 3 botellas de 330 ml de cerveza Amstel.
 - Si hay varias unidades, multiplica calorías y macros por el número total.
-- En fotos, estima el tamaño de cada porción visible. Incluye bebidas, salsas y aceite solo si son visibles o el texto los menciona.
+- En fotos, crea un elemento por cada componente comestible distinguible. Separa guarniciones, salsas, aceite, bebidas y unidades repetidas cuando afecte a la corrección.
+- box_2d es la región visible de ese componente como [ymin, xmin, ymax, xmax], normalizada de 0 a 1000. Si solo hay texto, usa [0, 0, 0, 0].
+- estimated_weight_g es el peso comestible total del componente, no el peso del recipiente. Estima volumen, densidad y parte oculta con prudencia.
+- Busca un objeto de escala conocido, como una carcasa de AirPods, una tarjeta o un cubierto. No lo incluyas como alimento. Solo úsalo para escala si su tipo es razonablemente identificable y está aproximadamente en el mismo plano que la comida.
+- Las carcasas de AirPods varían según el modelo. Si no identificas el modelo exacto, usa dimensiones aproximadas, baja reference_object.confidence y explícalo en assumptions.
+- Un objeto de referencia mejora la escala en el plano, pero no revela por sí solo el grosor, densidad, relleno, aceite absorbido ni comida oculta. Refleja esa incertidumbre en confidence y en el rango calórico.
+- Incluye aceite y salsas solo si son visibles, los menciona el usuario o son muy probables por la preparación. Cuando sean probables pero no demostrables, indícalo como supuesto.
+- portion_basis explica brevemente de dónde sale el peso: referencia visual, unidad conocida, etiqueta, tamaño del plato o densidad habitual.
 - name debe ser corto pero describir todo el registro. amount_description debe dejar claras unidades y porciones.
-- calories, protein, carbohydrates y fat son totales del registro, no por unidad.
+- calories, protein, carbohydrates y fat de arriba son la suma exacta de items.
+- calories_low y calories_high forman un rango plausible para todo el registro. El valor calories seleccionado debe quedar aproximadamente en el percentil 65 del rango, con un sesgo superior pequeño para evitar infravalorar, nunca en el máximo salvo evidencia clara.
+- Cada item incluye calories_low, calories_high y el valor calories elegido aproximadamente en el percentil 65 de su propio rango. No infles porciones arbitrariamente y no inventes alimentos que no se vean ni se mencionen.
 - La energía del alcohol puede hacer que las calorías no coincidan con 4/4/9 de los macros.
-- confidence va de 0 a 1. Usa 0.55 o menos si la cantidad no puede inferirse con razonable seguridad.
-- assumptions contiene como máximo tres supuestos breves y útiles para corregir la estimación.
+- confidence va de 0 a 1. Usa 0.55 o menos si la cantidad no puede inferirse con razonable seguridad. Cada item tiene su propia confianza.
+- assumptions contiene como máximo cinco supuestos breves y útiles para corregir la estimación.
 - meal se infiere con la hora local y el contenido: breakfast, lunch, dinner o snack.
 - No des consejos médicos ni texto adicional.
 
@@ -122,24 +189,28 @@ Texto del usuario: ${text || "Sin texto, usa la imagen."}
   const parts: Record<string, unknown>[] = [{ text: prompt }];
   if (imageBase64) parts.push({ inline_data: { mime_type: mimeType, data: imageBase64 } });
 
-  const geminiResponse = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-          responseSchema: schema,
-        },
-      }),
-    },
-  );
+  let geminiResponse: Response | null = null;
+  for (const model of ["gemini-3.5-flash", "gemini-2.5-flash"]) {
+    geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+            responseSchema: schema,
+          },
+        }),
+      },
+    );
+    if (geminiResponse.ok || geminiResponse.status !== 404) break;
+  }
 
-  if (!geminiResponse.ok) {
-    const detail = (await geminiResponse.text()).slice(0, 300);
+  if (!geminiResponse?.ok) {
+    const detail = geminiResponse ? (await geminiResponse.text()).slice(0, 300) : "no response";
     console.error("Gemini error", geminiResponse.status, detail);
     return response({ error: "food analysis failed" }, 502, origin);
   }
@@ -148,19 +219,57 @@ Texto del usuario: ${text || "Sin texto, usa la imagen."}
     const payload = await geminiResponse.json();
     const raw = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
     const result = JSON.parse(raw);
+    const items = (Array.isArray(result.items) ? result.items : []).slice(0, 30).map((item: Record<string, unknown>) => ({
+      name: String(item.name ?? "Alimento").trim().slice(0, 120),
+      estimated_weight_g: finite(item.estimated_weight_g, 0, 5000),
+      calories: finite(item.calories, 0, 10000),
+      calories_low: finite(item.calories_low, 0, 10000),
+      calories_high: finite(item.calories_high, 0, 10000),
+      protein: finite(item.protein, 0, 1000),
+      carbohydrates: finite(item.carbohydrates, 0, 1000),
+      fat: finite(item.fat, 0, 1000),
+      confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.5)),
+      portion_basis: String(item.portion_basis ?? "Estimación visual").trim().slice(0, 180),
+      box_2d: normalizedBox(item.box_2d),
+    }));
+    if (!items.length) throw new Error("analysis returned no items");
+    for (const item of items) {
+      item.calories_low = Math.min(Number(item.calories_low), Number(item.calories));
+      item.calories_high = Math.max(Number(item.calories_high), Number(item.calories));
+    }
+    const totals = items.reduce((sum: Record<string, number>, item: Record<string, unknown>) => ({
+      calories: sum.calories + Number(item.calories),
+      protein: sum.protein + Number(item.protein),
+      carbohydrates: sum.carbohydrates + Number(item.carbohydrates),
+      fat: sum.fat + Number(item.fat),
+    }), { calories: 0, protein: 0, carbohydrates: 0, fat: 0 });
     const meal = ["breakfast", "lunch", "dinner", "snack"].includes(result.meal) ? result.meal : "snack";
+    const caloriesLow = Math.min(totals.calories, finite(result.calories_low, 0, 10000));
+    const caloriesHigh = Math.max(totals.calories, finite(result.calories_high, 0, 10000));
+    const referenceObject = result.reference_object ?? {};
     return response({
       name: String(result.name ?? "Registro de comida").trim().slice(0, 180),
       amount_description: String(result.amount_description ?? "").trim().slice(0, 500),
-      calories: finite(result.calories, 0, 10000),
-      protein: finite(result.protein, 0, 1000),
-      carbohydrates: finite(result.carbohydrates, 0, 1000),
-      fat: finite(result.fat, 0, 1000),
+      calories: Math.round(totals.calories * 10) / 10,
+      protein: Math.round(totals.protein * 10) / 10,
+      carbohydrates: Math.round(totals.carbohydrates * 10) / 10,
+      fat: Math.round(totals.fat * 10) / 10,
+      calories_low: caloriesLow,
+      calories_high: caloriesHigh,
       confidence: Math.max(0, Math.min(1, Number(result.confidence) || 0.5)),
       meal,
       assumptions: Array.isArray(result.assumptions)
-        ? result.assumptions.slice(0, 3).map((item: unknown) => String(item).slice(0, 180))
+        ? result.assumptions.slice(0, 5).map((item: unknown) => String(item).slice(0, 180))
         : [],
+      reference_object: {
+        detected: Boolean(referenceObject.detected),
+        object: String(referenceObject.object ?? "").trim().slice(0, 120),
+        assumed_width_mm: finite(referenceObject.assumed_width_mm ?? 0, 0, 1000),
+        assumed_height_mm: finite(referenceObject.assumed_height_mm ?? 0, 0, 1000),
+        confidence: Math.max(0, Math.min(1, Number(referenceObject.confidence) || 0)),
+        same_plane: Boolean(referenceObject.same_plane),
+      },
+      items,
     }, 200, origin);
   } catch (error) {
     console.error("Invalid Gemini response", error);

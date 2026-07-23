@@ -16,10 +16,13 @@ El puente SwiftUI sigue disponible como alternativa local, pero ya no es necesar
 
 ## Registro automático de comida
 
-- Foto: se reduce a JPEG antes del envío, Gemini estima el total y el registro se guarda automáticamente.
+- Foto: se reduce a JPEG antes del envío. Gemini separa los componentes visibles, devuelve su región, estima gramos y calcula un rango calórico.
 - Texto: acepta lenguaje cotidiano y marcas, por ejemplo `tres tercios Amstel`.
-- Cada resultado conserva calorías, proteína, carbohidratos, grasa, confianza y los supuestos principales.
-- La fila se puede tocar para corregir o eliminar. Una RPC recalcula el total del día de forma atómica.
+- Un objeto conocido en el mismo plano, como una carcasa de AirPods, puede ayudar a estimar la escala. No elimina la incertidumbre sobre grosor, densidad, relleno o aceite.
+- Antes de guardar se pueden corregir gramos y macros, eliminar componentes o añadir otro con IA. Las regiones detectadas se numeran sobre la foto.
+- El valor usado aplica un sesgo superior moderado dentro del rango plausible para reducir la infravaloración sin elegir sistemáticamente el máximo.
+- Cada resultado conserva componentes, calorías, rango, macros, confianza, referencia visual y supuestos principales.
+- La fila se puede tocar para volver a revisar. Una RPC recalcula el total del día de forma atómica.
 - La función requiere una sesión de Supabase. `GEMINI_API_KEY` existe solo como secreto del proyecto.
 
 ## Cálculos
