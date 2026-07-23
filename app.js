@@ -17,6 +17,7 @@ import { localDay, mealLabel, normalizeFoodAnalysis, totalsForDay } from "./food
 
 const LEGACY_STORAGE_KEY = "cuttrack.v1";
 const STORAGE_KEY = "cuttrack.cache.v1";
+const HEALTH_EXPORT_TOKEN_KEY = "cuttrack.health-export.v1";
 const defaultState = {
   version: 1,
   configured: false,
@@ -46,6 +47,10 @@ const todayISO = () => localDay();
 
 function storageKey() {
   return cloud.user?.id ? `${STORAGE_KEY}.${cloud.user.id}` : null;
+}
+
+function healthExportTokenKey() {
+  return `${HEALTH_EXPORT_TOKEN_KEY}.${cloud.user?.id ?? "signed-out"}`;
 }
 
 function parseState(raw) {
@@ -563,6 +568,138 @@ function updateAccountUI() {
   $("#pending-count").textContent = `${cloud.pendingCount} pendiente${cloud.pendingCount === 1 ? "" : "s"}`;
 }
 
+function readableSyncDate(value) {
+  if (!value) return "Esperando la primera sincronización.";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Sincronización recibida.";
+  return `Última sincronización: ${new Intl.DateTimeFormat("es-ES", { dateStyle: "short", timeStyle: "short" }).format(date)}`;
+}
+
+function setIntegrationStatus(provider, payload = {}) {
+  const connected = Boolean(payload.connected);
+  const error = payload.status === "error" || Boolean(payload.last_error);
+  const dot = $(`#${provider}-connection-dot`);
+  dot.className = `connection-dot${error ? " error" : connected ? " connected" : ""}`;
+  $(`#${provider}-connection-title`).textContent = error ? "Necesita atención" : connected ? "Conectado" : "Sin conectar";
+  $(`#${provider}-sync-status`).textContent = error
+    ? String(payload.last_error || "La última sincronización falló.")
+    : connected
+      ? readableSyncDate(payload.last_sync_at)
+      : provider === "hevy"
+        ? "Se sincronizará desde la nube aunque CutTrack esté cerrado."
+        : "Todavía no se han recibido datos.";
+  if (provider === "hevy") {
+    $("#hevy-connect-form").classList.toggle("hidden", connected);
+    $("#hevy-connected-actions").classList.toggle("hidden", !connected);
+  }
+}
+
+async function refreshIntegrations() {
+  updateHealthExportLink();
+  if (!cloud.isSignedIn) {
+    setIntegrationStatus("health", {});
+    setIntegrationStatus("hevy", {});
+    return;
+  }
+  const [health, hevy] = await Promise.allSettled([
+    cloud.healthIntegration("status"),
+    cloud.hevyIntegration("status")
+  ]);
+  setIntegrationStatus("health", health.status === "fulfilled" ? health.value : { status: "error", last_error: health.reason?.message });
+  setIntegrationStatus("hevy", hevy.status === "fulfilled" ? hevy.value : { status: "error", last_error: hevy.reason?.message });
+}
+
+function healthExportLink({ endpoint, token, workouts = false }) {
+  const parameters = {
+    url: endpoint,
+    name: workouts ? "CutTrack entrenamientos" : "CutTrack salud",
+    format: "json",
+    datatype: workouts ? "workouts" : "healthMetrics",
+    period: "none",
+    exportversion: "v2",
+    syncinterval: "hours",
+    syncquantity: "2",
+    headers: `X-API-Key,${token}`,
+    requesttimeout: "60",
+    batchrequests: "false",
+    notifyonupdate: "false",
+    notifywhenrun: "false",
+    enabled: "true"
+  };
+  if (workouts) {
+    parameters.includeroutes = "false";
+    parameters.includeworkoutmetadata = "true";
+    parameters.workoutsmetadatainterval = "minutes";
+  } else {
+    parameters.metrics = "Step Count,Active Energy,Basal Energy Burned,Resting Heart Rate,Sleep Analysis,Weight & Body Mass,Body Fat Percentage";
+    parameters.interval = "days";
+    parameters.aggregatedata = "true";
+    parameters.aggregatesleep = "true";
+  }
+  const query = Object.entries(parameters)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return `com.HealthExport://automation?${query}`;
+}
+
+function updateHealthExportLink() {
+  let connection;
+  try {
+    connection = JSON.parse(localStorage.getItem(healthExportTokenKey()));
+  } catch {
+    connection = null;
+  }
+  const link = $("#open-health-export");
+  link.classList.toggle("hidden", !connection?.token || !connection?.endpoint);
+  if (connection?.token && connection?.endpoint) link.href = healthExportLink(connection);
+}
+
+async function setupHealthExport() {
+  if (!cloud.isSignedIn) return showAuthDialog();
+  const button = $("#setup-health-export");
+  button.disabled = true;
+  try {
+    const connection = await cloud.healthIntegration("create");
+    localStorage.setItem(healthExportTokenKey(), JSON.stringify({ token: connection.token, endpoint: connection.endpoint }));
+    updateHealthExportLink();
+    setIntegrationStatus("health", connection);
+    showToast("Abriendo la configuración de Salud…");
+    window.location.href = healthExportLink(connection);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setupHealthWorkouts() {
+  let connection;
+  try {
+    connection = JSON.parse(localStorage.getItem(healthExportTokenKey()));
+  } catch {
+    connection = null;
+  }
+  if (!connection?.token || !connection?.endpoint) {
+    showToast("Pulsa primero Conectar datos de Salud.");
+    return;
+  }
+  showToast("Abriendo la configuración de entrenamientos…");
+  window.location.href = healthExportLink({ ...connection, workouts: true });
+}
+
+async function disconnectHealthExport() {
+  if (!confirm("¿Desconectar los envíos de Apple Salud? Los datos ya guardados se conservarán.")) return;
+  try {
+    const result = await cloud.healthIntegration("revoke");
+    localStorage.removeItem(healthExportTokenKey());
+    updateHealthExportLink();
+    setIntegrationStatus("health", result);
+    showToast("Apple Salud desconectado.");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
 function updateCloudStatus({ status, detail = "", pending = cloud.pendingCount }) {
   const labels = {
     online: pending ? `${pending} cambios pendientes` : "Guardado en tu cuenta",
@@ -581,6 +718,7 @@ function updateCloudStatus({ status, detail = "", pending = cloud.pendingCount }
     state = structuredClone(defaultState);
     renderEntryForm(todayISO());
     renderAll();
+    refreshIntegrations();
   }
 }
 
@@ -642,6 +780,8 @@ async function completeSignIn() {
     return;
   }
   if (!remote?.configured && !state.configured) $("#onboarding-dialog").showModal();
+  refreshIntegrations();
+  updateHealthExportLink();
 }
 
 async function initializeCloud() {
@@ -783,6 +923,49 @@ function bindEvents() {
     showToast("Copia local renovada desde tu cuenta.");
   });
   $("#sync-cloud").addEventListener("click", () => syncCloud());
+  $("#setup-health-export").addEventListener("click", setupHealthExport);
+  $("#setup-health-workouts").addEventListener("click", setupHealthWorkouts);
+  $("#disconnect-health-export").addEventListener("click", disconnectHealthExport);
+  $("#hevy-connect-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true;
+    try {
+      const result = await cloud.hevyIntegration("connect", form.elements.apiKey.value);
+      form.reset();
+      setIntegrationStatus("hevy", result);
+      await syncCloud({ quiet: true });
+      showToast(`${result.workouts ?? 0} entrenamientos sincronizados.`);
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#sync-hevy-now").addEventListener("click", async event => {
+    event.currentTarget.disabled = true;
+    try {
+      const result = await cloud.hevyIntegration("sync");
+      setIntegrationStatus("hevy", result);
+      await syncCloud({ quiet: true });
+      showToast(`${result.workouts ?? 0} entrenamientos sincronizados.`);
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      event.currentTarget.disabled = false;
+    }
+  });
+  $("#disconnect-hevy").addEventListener("click", async () => {
+    if (!confirm("¿Desconectar Hevy? Los entrenamientos ya guardados se conservarán.")) return;
+    try {
+      const result = await cloud.hevyIntegration("disconnect");
+      setIntegrationStatus("hevy", result);
+      showToast("Hevy desconectado.");
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
   $("#sign-out").addEventListener("click", async () => {
     await cloud.signOut();
     state = structuredClone(defaultState);
@@ -842,6 +1025,12 @@ function bindEvents() {
   window.addEventListener("beforeinstallprompt", event => { event.preventDefault(); deferredInstallPrompt = event; });
   window.addEventListener("online", () => syncCloud({ quiet: true }));
   window.addEventListener("offline", () => updateCloudStatus({ status: "offline", detail: "Sin conexión" }));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && cloud.isSignedIn) {
+      refreshIntegrations();
+      syncCloud({ quiet: true });
+    }
+  });
 }
 
 function registerServiceWorker() {

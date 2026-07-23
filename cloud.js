@@ -132,7 +132,7 @@ export class CutTrackCloud {
       body: JSON.stringify(body)
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error ?? payload.message ?? "No se pudo analizar la comida");
+    if (!response.ok) throw new Error(payload.error ?? payload.message ?? "No se pudo completar la operación");
     return payload;
   }
 
@@ -142,6 +142,17 @@ export class CutTrackCloud {
       image_base64: imageBase64,
       mime_type: mimeType,
       local_time: new Date().toISOString()
+    });
+  }
+
+  async healthIntegration(action = "status") {
+    return this.functionRequest("health-import", { action });
+  }
+
+  async hevyIntegration(action = "status", apiKey = "") {
+    return this.functionRequest("hevy-sync", {
+      action,
+      ...(apiKey ? { api_key: apiKey } : {})
     });
   }
 

@@ -207,8 +207,37 @@
         </article>
 
         <article class="card integration-card">
-          <div class="integration-heading"><span aria-hidden="true">♥</span><div><h2>Puente del iPhone</h2><p>Apple Salud y entrenamientos de Hevy.</p></div></div>
-          <p class="form-help" id="health-sync-status">La app nativa de CutTrack sube Salud y Hevy a esta misma cuenta. Las claves privadas se quedan en Keychain. iOS decide cuándo permite la sincronización en segundo plano.</p>
+          <div class="integration-heading"><span aria-hidden="true">♥</span><div><h2>Apple Salud y Garmin</h2><p>Sin cable, mediante Health Auto Export.</p></div></div>
+          <div class="connection-row">
+            <span class="connection-dot" id="health-connection-dot" aria-hidden="true"></span>
+            <div><strong id="health-connection-title">Sin conectar</strong><small id="health-sync-status">Todavía no se han recibido datos.</small></div>
+          </div>
+          <a class="secondary-button external-button" href="https://apps.apple.com/app/health-auto-export-json-csv/id1115567069" target="_blank" rel="noreferrer">Instalar Health Auto Export</a>
+          <button class="primary-button" id="setup-health-export" type="button">1. Conectar datos de Salud</button>
+          <a class="primary-button external-button hidden" id="open-health-export" href="#">Abrir configuración preparada</a>
+          <button class="secondary-button" id="setup-health-workouts" type="button">2. Añadir entrenamientos de Garmin</button>
+          <details class="integration-details">
+            <summary>Cómo funciona</summary>
+            <p>El primer botón abre Health Auto Export con la URL, métricas y clave ya configuradas. Para Garmin, activa Garmin Connect en Salud y abre Garmin Connect cuando sincronices el reloj. La automatización en segundo plano requiere el plan Premium de Health Auto Export.</p>
+            <button class="text-button danger" id="disconnect-health-export" type="button">Desconectar esta vía</button>
+          </details>
+        </article>
+
+        <article class="card integration-card">
+          <div class="integration-heading"><span aria-hidden="true">🏋</span><div><h2>Hevy</h2><p>Entrenamientos desde la API oficial.</p></div></div>
+          <div class="connection-row">
+            <span class="connection-dot" id="hevy-connection-dot" aria-hidden="true"></span>
+            <div><strong id="hevy-connection-title">Sin conectar</strong><small id="hevy-sync-status">Se sincronizará desde la nube aunque CutTrack esté cerrado.</small></div>
+          </div>
+          <form id="hevy-connect-form" class="compact-form">
+            <label>Clave de desarrollador de Hevy<input name="apiKey" type="password" autocomplete="off" placeholder="Pega la clave una sola vez" required></label>
+            <button class="primary-button" type="submit">Conectar Hevy</button>
+          </form>
+          <div class="button-row hidden" id="hevy-connected-actions">
+            <button class="secondary-button" id="sync-hevy-now" type="button">Sincronizar ahora</button>
+            <button class="text-button danger" id="disconnect-hevy" type="button">Desconectar</button>
+          </div>
+          <p class="form-help">La clave se cifra antes de guardarse. Hevy exige una cuenta Pro y permite crear la clave en <a href="https://hevy.com/settings?developer" target="_blank" rel="noreferrer">sus ajustes web</a>.</p>
         </article>
 
         <article class="card integration-card">

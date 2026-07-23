@@ -2,7 +2,17 @@
 
 PWA instalable y privada para estimar déficit energético, seguir proteína, peso, composición corporal y entrenamientos de Hevy.
 
-Supabase guarda la cuenta, los ajustes, los registros diarios y la réplica de Apple Salud y Hevy. El navegador mantiene una caché offline separada por usuario. Una app iOS nativa es el único puente autorizado para leer HealthKit y usar la clave de Hevy, que permanece en Keychain.
+Supabase guarda la cuenta, los ajustes, los registros diarios y la réplica de Apple Salud, Garmin y Hevy. El navegador mantiene una caché offline separada por usuario.
+
+## Sincronización sin cable
+
+- Apple Salud: Health Auto Export envía por REST resúmenes de peso, grasa corporal, pasos, sueño, energía activa, energía basal y frecuencia cardiaca en reposo.
+- Garmin: Garmin Connect escribe sus métricas y actividades en Apple Salud. Health Auto Export usa la misma ruta de entrada de CutTrack.
+- Hevy: una Edge Function valida la clave oficial, la cifra con AES-GCM y sincroniza entrenamientos cada treinta minutos mediante Supabase Cron.
+- El webhook de Salud usa una clave aleatoria de escritura. En la base solo se guarda su hash y nunca permite leer el historial.
+- La PWA genera un deep link que prepara Health Auto Export con endpoint, métricas, agregación diaria y frecuencia. iOS sigue decidiendo cuándo concede tiempo de segundo plano y no deja leer Salud mientras el dispositivo está bloqueado.
+
+El puente SwiftUI sigue disponible como alternativa local, pero ya no es necesario conectar el iPhone al Mac para alimentar la PWA.
 
 ## Registro automático de comida
 
@@ -32,6 +42,8 @@ npm run serve
 ```
 
 Abre `http://localhost:4173`. Para probar el modo instalable y offline se requiere HTTPS o localhost.
+
+Las integraciones cloud usan las funciones `health-import` y `hevy-sync`. Los secretos `INTEGRATION_ENCRYPTION_KEY` y `HEVY_CRON_SECRET` solo existen en Supabase. El job de `supabase/cron/hevy-sync.sql` ejecuta la sincronización de Hevy cada treinta minutos.
 
 ## Despliegue
 

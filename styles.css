@@ -23,6 +23,7 @@ body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; 
 button, input, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+a { color: var(--green); }
 
 .app-shell { width: min(100%, 680px); margin: 0 auto; min-height: 100vh; padding-bottom: calc(112px + var(--safe-bottom)); }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: calc(var(--safe-top) + 12px) 20px 20px; position: relative; }
@@ -176,6 +177,18 @@ textarea::placeholder { color: #666a74; }
 .integration-heading { display: flex; gap: 12px; align-items: center; }
 .integration-heading > span { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; background: var(--card-2); font-size: 20px; }
 .integration-heading p, .danger-zone p { color: var(--muted); font-size: 12px; margin: 3px 0 0; }
+.connection-row { display: flex; gap: 10px; align-items: center; min-height: 42px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 16px; background: #121419; }
+.connection-row > div { min-width: 0; display: grid; gap: 3px; }
+.connection-row strong { font-size: 13px; }
+.connection-row small { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.connection-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: #5a5d67; box-shadow: 0 0 0 4px rgba(90, 93, 103, .12); }
+.connection-dot.connected { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 14%, transparent); }
+.connection-dot.error { background: var(--coral); box-shadow: 0 0 0 4px color-mix(in srgb, var(--coral) 14%, transparent); }
+.external-button { display: grid; place-items: center; text-decoration: none; }
+.compact-form { display: grid; gap: 10px; }
+.integration-details { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.integration-details summary { cursor: pointer; color: var(--text); font-weight: 750; }
+.integration-details p { margin: 10px 0 2px; }
 .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .sync-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
 .sync-row strong { color: var(--green); font-size: 11px; white-space: nowrap; }
