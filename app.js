@@ -13,6 +13,7 @@ import {
   sortEntries
 } from "./stats.js";
 import { cloud } from "./cloud.js";
+import { localDay, mealLabel, normalizeFoodAnalysis, totalsForDay } from "./food.js";
 
 const LEGACY_STORAGE_KEY = "cuttrack.v1";
 const STORAGE_KEY = "cuttrack.cache.v1";
@@ -28,18 +29,20 @@ const defaultState = {
     currentBodyFat: null
   },
   entries: [],
+  foods: [],
   workouts: []
 };
 
 let state = loadState();
 let deferredInstallPrompt = null;
 let cloudSyncPromise = null;
+let selectedFoodImage = null;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const formatNumber = (value, digits = 0) => Number(value).toLocaleString("es-ES", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 const formatDate = date => new Intl.DateTimeFormat("es-ES", { day: "numeric", month: "short", year: "numeric" }).format(date);
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => localDay();
 
 function storageKey() {
   return cloud.user?.id ? `${STORAGE_KEY}.${cloud.user.id}` : null;
@@ -54,6 +57,7 @@ function parseState(raw) {
       ...stored,
       settings: { ...defaultState.settings, ...stored.settings },
       entries: Array.isArray(stored.entries) ? stored.entries : [],
+      foods: Array.isArray(stored.foods) ? stored.foods : [],
       workouts: Array.isArray(stored.workouts) ? stored.workouts : []
     };
   } catch {
@@ -126,6 +130,41 @@ function renderToday() {
   renderProjections(model);
   renderWeekly(model);
   renderInsight(model);
+  renderFoods();
+}
+
+function foodRow(food, { includeDate = false } = {}) {
+  const consumed = new Date(food.consumedAt);
+  const date = includeDate
+    ? new Intl.DateTimeFormat("es-ES", { weekday: "short", day: "numeric", month: "short" }).format(consumed)
+    : mealLabel(food.meal);
+  const confidence = food.confidence !== null && Number(food.confidence) < 0.65
+    ? `<span class="food-confidence">revisar</span>`
+    : "";
+  return `<button class="food-row card" type="button" data-food-id="${escapeHTML(food.id)}">
+    <span class="food-row-icon">${food.source === "photo_ai" ? "◎" : "✦"}</span>
+    <span class="food-row-copy">
+      <span class="food-row-meta">${escapeHTML(date)} ${confidence}</span>
+      <strong>${escapeHTML(food.name)}</strong>
+      <small>${escapeHTML(food.amountDescription || "Estimación de la IA")}</small>
+      <span class="food-macros">P ${formatNumber(food.protein, 0)} · C ${formatNumber(food.carbohydrates, 0)} · G ${formatNumber(food.fat, 0)}</span>
+    </span>
+    <span class="food-row-calories"><strong>${formatNumber(food.calories)}</strong><small>kcal</small></span>
+  </button>`;
+}
+
+function renderFoods() {
+  const foods = [...state.foods].filter(food => !food.deletedAt).sort((a, b) => String(b.consumedAt).localeCompare(String(a.consumedAt)));
+  const today = todayISO();
+  const todayFoods = foods.filter(food => localDay(food.consumedAt) === today);
+  const totals = totalsForDay(todayFoods, today);
+  $("#today-food-total").textContent = `${formatNumber(totals.calories)} kcal`;
+  $("#today-food-list").innerHTML = todayFoods.length
+    ? todayFoods.map(food => foodRow(food)).join("")
+    : `<button class="empty-food card" id="empty-food-add" type="button"><span>✦</span><strong>Añade la primera comida</strong><small>Haz una foto o escríbela tal cual</small></button>`;
+  $("#all-food-list").innerHTML = foods.length
+    ? foods.slice(0, 60).map(food => foodRow(food, { includeDate: true })).join("")
+    : `<p class="empty-state">Todavía no hay comidas. La primera se añadirá aquí automáticamente.</p>`;
 }
 
 function projectionDate(projection) {
@@ -313,13 +352,13 @@ function renderAll() {
   renderToday();
   renderProgress();
   renderSettings();
+  renderFoods();
   if (!$("#entry-date").value) renderEntryForm();
 }
 
 function navigate(target) {
   $$(".view").forEach(view => view.classList.toggle("active", view.dataset.view === target));
   $$(".tabbar button").forEach(button => button.classList.toggle("active", button.dataset.target === target));
-  $("#quick-add").classList.toggle("hidden", target === "log" || target === "settings");
   if (target === "log") renderEntryForm($("#entry-date").value || todayISO());
   if (target === "progress") renderProgress();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -335,6 +374,187 @@ function showToast(message) {
   toast.classList.add("visible");
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove("visible"), 2600);
+}
+
+function updateLocalNutrition(day) {
+  const totals = totalsForDay(state.foods, day);
+  const previous = state.entries.find(entry => entry.date === day) ?? { date: day };
+  state.entries = state.entries.filter(entry => entry.date !== day);
+  state.entries.push({
+    ...previous,
+    calories: state.foods.some(food => !food.deletedAt && localDay(food.consumedAt) === day) ? Math.round(totals.calories) : null,
+    protein: state.foods.some(food => !food.deletedAt && localDay(food.consumedAt) === day) ? Math.round(totals.protein * 10) / 10 : null
+  });
+}
+
+function clearSelectedFoodImage() {
+  if (selectedFoodImage?.previewURL) URL.revokeObjectURL(selectedFoodImage.previewURL);
+  selectedFoodImage = null;
+  $("#food-camera-input").value = "";
+  $("#food-library-input").value = "";
+  $("#capture-preview-wrap").classList.add("hidden");
+  $("#capture-preview").removeAttribute("src");
+}
+
+function openFoodDialog({ camera = false } = {}) {
+  if (!cloud.isSignedIn) {
+    showAuthDialog();
+    return;
+  }
+  clearSelectedFoodImage();
+  $("#food-capture-form").reset();
+  $("#food-analysis-status").textContent = "";
+  const dialog = $("#food-dialog");
+  if (!dialog.open) dialog.showModal();
+  if (camera) setTimeout(() => $("#food-camera-input").click(), 120);
+  else setTimeout(() => $("#food-text").focus(), 120);
+}
+
+async function compressFoodImage(file) {
+  const objectURL = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = objectURL;
+    await image.decode();
+    const maxDimension = 1600;
+    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d", { alpha: false }).drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("No se pudo preparar la foto")), "image/jpeg", 0.78));
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    return { blob, base64, mimeType: "image/jpeg", previewURL: URL.createObjectURL(blob) };
+  } finally {
+    URL.revokeObjectURL(objectURL);
+  }
+}
+
+async function selectFoodImage(file) {
+  if (!file) return;
+  $("#food-analysis-status").textContent = "Preparando foto…";
+  try {
+    clearSelectedFoodImage();
+    selectedFoodImage = await compressFoodImage(file);
+    $("#capture-preview").src = selectedFoodImage.previewURL;
+    $("#capture-preview-wrap").classList.remove("hidden");
+    $("#food-analysis-status").textContent = "Foto lista. Analizando…";
+    await analyzeAndAddFood();
+  } catch (error) {
+    $("#food-analysis-status").textContent = error.message;
+  }
+}
+
+async function analyzeAndAddFood(event) {
+  event?.preventDefault();
+  const text = $("#food-text").value.trim();
+  if (!text && !selectedFoodImage) {
+    $("#food-analysis-status").textContent = "Escribe algo o añade una foto.";
+    return;
+  }
+  const button = $("#analyze-food");
+  if (button.disabled) return;
+  button.disabled = true;
+  button.innerHTML = `<span class="spinner"></span> Reconociendo…`;
+  $("#food-analysis-status").textContent = "Calculando porciones, calorías y macros…";
+  try {
+    const raw = await cloud.analyzeFood({
+      text,
+      imageBase64: selectedFoodImage?.base64 ?? "",
+      mimeType: selectedFoodImage?.mimeType ?? "image/jpeg"
+    });
+    const analysis = normalizeFoodAnalysis(raw);
+    const id = crypto.randomUUID();
+    let imagePath = null;
+    if (selectedFoodImage) {
+      try { imagePath = await cloud.uploadFoodImage(selectedFoodImage.blob, id); } catch { imagePath = null; }
+    }
+    const food = {
+      id,
+      consumedAt: new Date().toISOString(),
+      meal: analysis.meal,
+      name: analysis.name,
+      amountDescription: analysis.amountDescription,
+      calories: analysis.calories,
+      protein: analysis.protein,
+      carbohydrates: analysis.carbohydrates,
+      fat: analysis.fat,
+      confidence: analysis.confidence,
+      source: selectedFoodImage ? "photo_ai" : "text_ai",
+      inputText: text,
+      imagePath,
+      assumptions: analysis.assumptions,
+      clientUpdatedAt: new Date().toISOString()
+    };
+    state.foods.unshift(food);
+    updateLocalNutrition(localDay(food.consumedAt));
+    saveState();
+    const saved = await cloud.mutate("food-upsert", food);
+    $("#food-dialog").close();
+    clearSelectedFoodImage();
+    renderAll();
+    showToast(saved ? `${food.name}, ${formatNumber(food.calories)} kcal añadidas.` : "Registro guardado. Se sincronizará al recuperar conexión.");
+  } catch (error) {
+    $("#food-analysis-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.innerHTML = `<span>✦</span> Analizar y añadir`;
+  }
+}
+
+function openFoodEditor(id) {
+  const food = state.foods.find(item => item.id === id);
+  if (!food) return;
+  const form = $("#food-edit-form");
+  for (const field of ["id", "name", "amountDescription", "calories", "protein", "carbohydrates", "fat"]) {
+    form.elements[field].value = food[field] ?? "";
+  }
+  $("#food-assumptions").textContent = food.assumptions?.length ? `Supuestos: ${food.assumptions.join(" · ")}` : "Estimación de la IA. Ajusta cualquier dato si conoces la etiqueta o la cantidad exacta.";
+  $("#food-edit-dialog").showModal();
+}
+
+async function saveFoodCorrection(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const food = state.foods.find(item => item.id === form.elements.id.value);
+  if (!food) return;
+  const oldDay = localDay(food.consumedAt);
+  Object.assign(food, {
+    name: form.elements.name.value.trim(),
+    amountDescription: form.elements.amountDescription.value.trim(),
+    calories: Number(form.elements.calories.value),
+    protein: Number(form.elements.protein.value),
+    carbohydrates: Number(form.elements.carbohydrates.value),
+    fat: Number(form.elements.fat.value),
+    confidence: 1,
+    clientUpdatedAt: new Date().toISOString()
+  });
+  updateLocalNutrition(oldDay);
+  saveState();
+  await cloud.mutate("food-upsert", food);
+  $("#food-edit-dialog").close();
+  renderAll();
+  showToast("Corrección guardada.");
+}
+
+async function deleteSelectedFood() {
+  const id = $("#food-edit-form").elements.id.value;
+  const food = state.foods.find(item => item.id === id);
+  if (!food || !confirm(`¿Eliminar ${food.name}?`)) return;
+  const day = localDay(food.consumedAt);
+  state.foods = state.foods.filter(item => item.id !== id);
+  updateLocalNutrition(day);
+  saveState();
+  await cloud.mutate("food-delete", { id });
+  if (food.imagePath) cloud.deleteFoodImage(food.imagePath).catch(() => {});
+  $("#food-edit-dialog").close();
+  renderAll();
+  showToast("Registro eliminado.");
 }
 
 function updateAccountUI() {
@@ -367,6 +587,7 @@ function updateCloudStatus({ status, detail = "", pending = cloud.pendingCount }
 async function uploadCurrentState() {
   await cloud.mutate("profile-upsert", state.settings);
   for (const entry of state.entries) await cloud.mutate("entry-upsert", entry);
+  for (const food of state.foods) await cloud.mutate("food-upsert", food);
 }
 
 async function syncCloud({ quiet = false } = {}) {
@@ -488,16 +709,32 @@ async function importData(file) {
 
 function bindEvents() {
   $$(".tabbar button").forEach(button => button.addEventListener("click", () => navigate(button.dataset.target)));
-  $("#quick-add").addEventListener("click", () => navigate("log"));
+  $("#camera-shortcut").addEventListener("click", () => openFoodDialog({ camera: true }));
+  $("#text-shortcut").addEventListener("click", () => openFoodDialog());
+  $("#log-food-button").addEventListener("click", () => openFoodDialog());
+  $("#food-capture-form").addEventListener("submit", analyzeAndAddFood);
+  $("#capture-camera").addEventListener("click", () => $("#food-camera-input").click());
+  $("#capture-library").addEventListener("click", () => $("#food-library-input").click());
+  $("#food-camera-input").addEventListener("change", event => selectFoodImage(event.target.files[0]));
+  $("#food-library-input").addEventListener("change", event => selectFoodImage(event.target.files[0]));
+  $("#remove-capture-photo").addEventListener("click", clearSelectedFoodImage);
+  $(".close-food-dialog").addEventListener("click", () => { $("#food-dialog").close(); clearSelectedFoodImage(); });
+  $(".close-food-edit").addEventListener("click", () => $("#food-edit-dialog").close());
+  $("#food-edit-form").addEventListener("submit", saveFoodCorrection);
+  $("#delete-food").addEventListener("click", deleteSelectedFood);
+  document.addEventListener("click", event => {
+    const row = event.target.closest("[data-food-id]");
+    if (row) openFoodEditor(row.dataset.foodId);
+    if (event.target.closest("#empty-food-add")) openFoodDialog();
+  });
   $("#entry-date").addEventListener("change", event => renderEntryForm(event.target.value));
   $("#daily-form").addEventListener("submit", async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    const entry = { date: form.elements.date.value, ...formNumbers(form, ["calories", "protein", "weight", "bodyFat", "activeEnergy", "basalEnergy", "steps", "sleep"]) };
+    const existing = state.entries.find(item => item.date === form.elements.date.value) ?? {};
+    const entry = { ...existing, date: form.elements.date.value, ...formNumbers(form, ["calories", "protein"]) };
     state.entries = state.entries.filter(item => item.date !== entry.date);
     state.entries.push(entry);
-    if (entry.weight) state.settings.currentWeight = entry.weight;
-    if (entry.bodyFat) state.settings.currentBodyFat = entry.bodyFat;
     saveState();
     const cloudSaved = await cloud.mutate("entry-upsert", entry);
     renderAll();
@@ -525,7 +762,7 @@ function bindEvents() {
   });
   $("#onboarding-form").addEventListener("submit", async event => {
     event.preventDefault();
-    state.settings = { ...state.settings, ...formNumbers(event.currentTarget, ["calorieTarget", "proteinTarget", "tdeeEstimate", "mainBodyFatTarget", "currentWeight", "currentBodyFat"]) };
+    state.settings = { ...state.settings, ...formNumbers(event.currentTarget, ["calorieTarget", "proteinTarget", "tdeeEstimate", "mainBodyFatTarget"]) };
     state.configured = true;
     saveState();
     await cloud.mutate("profile-upsert", state.settings);

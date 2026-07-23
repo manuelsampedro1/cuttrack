@@ -20,9 +20,9 @@
 * { box-sizing: border-box; }
 html { background: var(--bg); }
 body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; }
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
 .app-shell { width: min(100%, 680px); margin: 0 auto; min-height: 100vh; padding-bottom: calc(112px + var(--safe-bottom)); }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: calc(var(--safe-top) + 12px) 20px 20px; position: relative; }
@@ -66,6 +66,38 @@ h1, h2 { letter-spacing: -.04em; }
 .metric-icon.purple { color: var(--purple); background: color-mix(in srgb, var(--purple) 14%, transparent); }
 .metric-card strong { font-size: 21px; letter-spacing: -.04em; }
 .metric-card small { color: var(--muted); grid-column: 1 / -1; font-size: 11px; }
+
+.food-capture-card { margin: 0 0 24px; padding: 18px; display: grid; gap: 16px; background: radial-gradient(circle at 100% 0, color-mix(in srgb, var(--green) 13%, transparent), transparent 48%), linear-gradient(145deg, #1a1c23, #15171c); }
+.food-capture-card h2 { margin: 0; font-size: 22px; }
+.food-capture-card p:last-child { color: var(--muted); font-size: 13px; margin: 6px 0 0; line-height: 1.45; }
+.food-capture-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.food-capture-actions button { border: 0; min-height: 54px; border-radius: 18px; font-weight: 850; }
+.food-capture-actions button span { font-size: 20px; margin-right: 5px; }
+.camera-action { background: var(--green); color: #07120a; }
+.text-action { background: #292c34; color: var(--text); border: 1px solid #393d47 !important; }
+.today-food-section { margin-bottom: 26px; }
+.compact-heading { align-items: center; }
+.compact-heading strong { color: var(--green); font-size: 13px; }
+.food-list { display: grid; gap: 9px; }
+.food-row { width: 100%; padding: 13px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 11px; align-items: center; color: var(--text); text-align: left; cursor: pointer; }
+.food-row:active { transform: scale(.99); }
+.food-row-icon { width: 38px; height: 38px; border-radius: 13px; display: grid; place-items: center; color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); font-size: 18px; }
+.food-row-copy { min-width: 0; display: grid; gap: 3px; }
+.food-row-copy strong { font-size: 14px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.food-row-copy small, .food-macros { color: var(--muted); font-size: 10px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.food-row-meta { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; }
+.food-confidence { margin-left: 5px; padding: 2px 5px; border-radius: 5px; color: #17110a; background: #f5c66b; }
+.food-row-calories { display: grid; text-align: right; font-variant-numeric: tabular-nums; }
+.food-row-calories strong { color: var(--green); font-size: 16px; }
+.food-row-calories small { color: var(--muted); font-size: 9px; }
+.empty-food { width: 100%; padding: 20px; display: grid; place-items: center; gap: 5px; color: var(--text); }
+.empty-food > span { color: var(--green); font-size: 22px; }
+.empty-food small { color: var(--muted); }
+.food-main-action { width: 100%; margin-bottom: 14px; }
+.full-food-list { margin-bottom: 18px; }
+.manual-fallback { border: 1px solid var(--line); border-radius: 20px; padding: 15px; color: var(--muted); }
+.manual-fallback summary { cursor: pointer; font-size: 12px; font-weight: 750; }
+.manual-fallback[open] summary { margin-bottom: 14px; }
 
 .section-heading, .card-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
 .section-heading { margin: 0 4px 12px; }
@@ -131,6 +163,8 @@ h1, h2 { letter-spacing: -.04em; }
 label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 650; }
 input { width: 100%; color: var(--text); background: #101216; border: 1px solid var(--line); border-radius: 14px; padding: 13px 12px; font-size: 16px; min-height: 48px; }
 input::placeholder { color: #555862; }
+textarea { width: 100%; resize: vertical; color: var(--text); background: #101216; border: 1px solid var(--line); border-radius: 18px; padding: 15px; font-size: 17px; line-height: 1.45; }
+textarea::placeholder { color: #666a74; }
 .form-help { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0; }
 .primary-button, .secondary-button { min-height: 52px; border: 0; border-radius: 18px; font-weight: 800; cursor: pointer; }
 .primary-button { background: var(--green); color: #07120a; padding: 14px 18px; }
@@ -149,8 +183,6 @@ input::placeholder { color: #555862; }
 .file-button input { display: none; }
 .danger-zone { margin-bottom: 20px; }
 
-.quick-add { position: fixed; right: max(22px, calc((100vw - 650px) / 2)); bottom: calc(83px + var(--safe-bottom)); z-index: 10; min-height: 49px; border-radius: 28px; border: 0; background: var(--green); color: #08110a; padding: 0 19px; font-size: 14px; font-weight: 850; box-shadow: 0 9px 28px rgba(33, 150, 79, .32); }
-.quick-add span { font-size: 23px; vertical-align: -2px; margin-right: 3px; }
 .tabbar { position: fixed; z-index: 9; left: 50%; transform: translateX(-50%); bottom: calc(8px + env(safe-area-inset-bottom)); width: min(calc(100% - 24px), 650px); min-height: 72px; border: 1px solid #383b45; background: rgba(30, 32, 39, .92); backdrop-filter: blur(22px) saturate(1.3); border-radius: 30px; padding: 6px; display: grid; grid-template-columns: repeat(4, 1fr); box-shadow: 0 14px 35px rgba(0, 0, 0, .4); }
 .tabbar button { border: 0; border-radius: 25px; color: #c6c8ce; background: transparent; display: grid; place-items: center; align-content: center; gap: 2px; font-size: 10px; font-weight: 700; }
 .tabbar button span { font-size: 22px; line-height: 1; }
@@ -176,6 +208,20 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); backdrop-filter: blur(5px); }
 .install-steps li { margin-bottom: 8px; padding-left: 5px; }
 .toast { position: fixed; left: 50%; bottom: calc(98px + var(--safe-bottom)); transform: translate(-50%, 20px); z-index: 30; background: #f1f3f2; color: #111; border-radius: 18px; padding: 12px 17px; font-size: 13px; font-weight: 750; opacity: 0; pointer-events: none; transition: .22s ease; max-width: calc(100% - 32px); text-align: center; box-shadow: 0 12px 35px rgba(0,0,0,.35); }
 .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
+.food-sheet form { display: grid; gap: 12px; }
+.food-sheet .primary-button { margin-top: 2px; }
+.capture-preview { height: min(33vh, 250px); border-radius: 20px; overflow: hidden; position: relative; background: #0d0f12; }
+.capture-preview img { width: 100%; height: 100%; object-fit: cover; }
+.preview-remove { position: absolute; top: 9px; right: 9px; width: 34px; height: 34px; border: 0; border-radius: 50%; background: rgba(10, 10, 12, .75); color: white; font-size: 24px; }
+.capture-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.analysis-status { min-height: 18px; margin: 0 !important; color: var(--green) !important; font-size: 12px !important; }
+.analyze-button { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.spinner { width: 17px; height: 17px; border: 2px solid rgba(7, 18, 10, .25); border-top-color: #07120a; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; }
+.nutrient-edit-grid { margin: 4px 0; }
+button:disabled { opacity: .55; cursor: wait; }
 
 @media (min-width: 560px) {
   main { padding: 0 20px; }

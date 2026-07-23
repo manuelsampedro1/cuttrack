@@ -11,4 +11,8 @@ CutTrack es una aplicación web estática con cuenta privada.
 - La exportación JSON sí contiene los datos introducidos por el usuario. Debe tratarse como un archivo privado.
 - Borrar la caché desde Ajustes elimina solo la copia del dispositivo y vuelve a descargar la cuenta.
 
+## Fotos y texto de comida
+
+La foto o el texto solo se envían cuando el usuario inicia un registro con IA. La imagen se comprime antes del envío. La función autenticada la envía a Gemini para obtener la estimación y la foto se guarda en un bucket privado de Supabase asociado al usuario. La clave de Gemini no se entrega al navegador. Los registros pueden corregirse o eliminarse desde la app.
+
 Una aplicación web no puede leer Apple Health directamente. El puente nativo sincroniza peso, grasa corporal, pasos, sueño, energía y frecuencia cardiaca en reposo con la misma cuenta.

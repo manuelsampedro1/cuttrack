@@ -35,11 +35,12 @@ test("Apple Salud prevalece sobre el dato manual del mismo día", async () => {
     if (value.includes("/nutrition_days")) return jsonResponse([{ day: "2026-07-23", calories: 1800, protein: 175, manual_weight: 82.5, manual_steps: 5000 }]);
     if (value.includes("/health_days")) return jsonResponse([{ day: "2026-07-23", weight: 81.9, steps: 9200, health_updated_at: "2026-07-23T12:00:00Z" }]);
     if (value.includes("/workouts")) return jsonResponse([]);
+    if (value.includes("/food_entries")) return jsonResponse([]);
     throw new Error(`URL inesperada: ${value}`);
   };
   const client = new CutTrackCloud();
   await client.signIn("test@example.com", "password123");
-  const defaults = { version: 1, configured: false, settings: {}, entries: [], workouts: [] };
+  const defaults = { version: 1, configured: false, settings: {}, entries: [], foods: [], workouts: [] };
   const state = await client.fetchRemoteState(defaults);
   assert.equal(state.entries[0].weight, 81.9);
   assert.equal(state.entries[0].steps, 9200);

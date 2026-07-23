@@ -120,6 +120,64 @@ export class CutTrackCloud {
     return payload;
   }
 
+  async functionRequest(name, body) {
+    await this.ensureSession();
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${this.session.access_token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error ?? payload.message ?? "No se pudo analizar la comida");
+    return payload;
+  }
+
+  async analyzeFood({ text = "", imageBase64 = "", mimeType = "image/jpeg" }) {
+    return this.functionRequest("analyze-food", {
+      text,
+      image_base64: imageBase64,
+      mime_type: mimeType,
+      local_time: new Date().toISOString()
+    });
+  }
+
+  async uploadFoodImage(blob, foodID) {
+    await this.ensureSession();
+    const extension = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+    const path = `${this.user.id}/${foodID}.${extension}`;
+    const response = await fetch(`${SUPABASE_URL}/storage/v1/object/food-images/${path}`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${this.session.access_token}`,
+        "Content-Type": blob.type || "image/jpeg",
+        "x-upsert": "true"
+      },
+      body: blob
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.message ?? "No se pudo guardar la foto");
+    }
+    return path;
+  }
+
+  async deleteFoodImage(path) {
+    await this.ensureSession();
+    const response = await fetch(`${SUPABASE_URL}/storage/v1/object/food-images/${path}`, {
+      method: "DELETE",
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${this.session.access_token}`
+      }
+    });
+    if (!response.ok && response.status !== 404) throw new Error("No se pudo borrar la foto");
+  }
+
   profileRow(settings) {
     return {
       user_id: this.user.id,
@@ -151,7 +209,11 @@ export class CutTrackCloud {
 
   enqueue(type, payload) {
     const outbox = readJSON(this.outboxKey, []);
-    const key = type === "entry-upsert" || type === "entry-delete" ? `entry:${payload.date ?? payload}` : type;
+    const key = type === "entry-upsert" || type === "entry-delete"
+      ? `entry:${payload.date ?? payload}`
+      : type === "food-upsert" || type === "food-delete"
+        ? `food:${payload.id ?? payload}`
+        : type;
     const filtered = outbox.filter(operation => operation.key !== key);
     filtered.push({ id: crypto.randomUUID(), key, type, payload, queuedAt: new Date().toISOString() });
     localStorage.setItem(this.outboxKey, JSON.stringify(filtered));
@@ -185,6 +247,28 @@ export class CutTrackCloud {
         prefer: "resolution=merge-duplicates,return=minimal"
       });
     }
+    if (type === "food-upsert") {
+      return this.rest("rpc/save_food_entry", { method: "POST", body: { p_entry: {
+        id: payload.id,
+        consumed_at: payload.consumedAt,
+        meal: payload.meal,
+        name: payload.name,
+        amount_description: payload.amountDescription,
+        calories: payload.calories,
+        protein: payload.protein,
+        carbohydrates: payload.carbohydrates,
+        fat: payload.fat,
+        confidence: payload.confidence,
+        source: payload.source,
+        input_text: payload.inputText,
+        image_path: payload.imagePath,
+        assumptions: payload.assumptions ?? [],
+        client_updated_at: payload.clientUpdatedAt ?? new Date().toISOString()
+      } } });
+    }
+    if (type === "food-delete") {
+      return this.rest("rpc/delete_food_entry", { method: "POST", body: { p_id: payload.id ?? payload } });
+    }
     throw new Error("Operación desconocida");
   }
 
@@ -216,11 +300,12 @@ export class CutTrackCloud {
   }
 
   async fetchRemoteState(defaultState) {
-    const [profiles, nutrition, health, workouts] = await Promise.all([
+    const [profiles, nutrition, health, workouts, foods] = await Promise.all([
       this.rest(`profiles?user_id=eq.${this.user.id}&select=*`),
       this.rest(`nutrition_days?user_id=eq.${this.user.id}&select=*&order=day.asc`),
       this.rest(`health_days?user_id=eq.${this.user.id}&select=*&order=day.asc`),
-      this.rest(`workouts?user_id=eq.${this.user.id}&select=*&order=started_at.desc`)
+      this.rest(`workouts?user_id=eq.${this.user.id}&select=*&order=started_at.desc`),
+      this.rest(`food_entries?user_id=eq.${this.user.id}&deleted_at=is.null&select=*&order=consumed_at.desc`)
     ]);
     const profile = profiles?.[0] ?? null;
     const byDay = new Map();
@@ -264,6 +349,23 @@ export class CutTrackCloud {
         currentBodyFat: profile.starting_body_fat === null ? null : Number(profile.starting_body_fat)
       } : structuredClone(defaultState.settings),
       entries: [...byDay.values()],
+      foods: (foods ?? []).map(row => ({
+        id: row.id,
+        consumedAt: row.consumed_at,
+        meal: row.meal,
+        name: row.name,
+        amountDescription: row.amount_description,
+        calories: Number(row.calories),
+        protein: Number(row.protein),
+        carbohydrates: Number(row.carbohydrates),
+        fat: Number(row.fat),
+        confidence: row.confidence === null ? null : Number(row.confidence),
+        source: row.source,
+        inputText: row.input_text,
+        imagePath: row.image_path,
+        assumptions: row.assumptions ?? [],
+        clientUpdatedAt: row.client_updated_at
+      })),
       workouts: (workouts ?? []).map(row => row.payload && Object.keys(row.payload).length ? row.payload : ({
         id: row.source_id, title: row.title, start_time: row.started_at, end_time: row.ended_at, exercises: []
       }))
@@ -281,6 +383,7 @@ export class CutTrackCloud {
       if (!remote.configured && localState.configured) {
         await this.perform("profile-upsert", localState.settings);
         for (const entry of localState.entries) await this.perform("entry-upsert", entry);
+        for (const food of localState.foods ?? []) await this.perform("food-upsert", food);
         remote = await this.fetchRemoteState(defaultState);
       }
       this.emit("online", "Todo sincronizado");

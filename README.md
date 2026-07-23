@@ -4,6 +4,14 @@ PWA instalable y privada para estimar déficit energético, seguir proteína, pe
 
 Supabase guarda la cuenta, los ajustes, los registros diarios y la réplica de Apple Salud y Hevy. El navegador mantiene una caché offline separada por usuario. Una app iOS nativa es el único puente autorizado para leer HealthKit y usar la clave de Hevy, que permanece en Keychain.
 
+## Registro automático de comida
+
+- Foto: se reduce a JPEG antes del envío, Gemini estima el total y el registro se guarda automáticamente.
+- Texto: acepta lenguaje cotidiano y marcas, por ejemplo `tres tercios Amstel`.
+- Cada resultado conserva calorías, proteína, carbohidratos, grasa, confianza y los supuestos principales.
+- La fila se puede tocar para corregir o eliminar. Una RPC recalcula el total del día de forma atómica.
+- La función requiere una sesión de Supabase. `GEMINI_API_KEY` existe solo como secreto del proyecto.
+
 ## Cálculos
 
 - Déficit del día: energía activa + energía basal - calorías ingeridas.

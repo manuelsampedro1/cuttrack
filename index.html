@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090a0d">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://shfpsrniibhbxmrjnhze.supabase.co; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://shfpsrniibhbxmrjnhze.supabase.co; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="CutTrack">
@@ -44,6 +44,26 @@
         </article>
 
         <div class="metric-grid" id="today-metrics"></div>
+
+        <article class="card food-capture-card">
+          <div>
+            <p class="eyebrow">REGISTRO CON IA</p>
+            <h2>Foto o cuéntamelo</h2>
+            <p>“Tres tercios Amstel” o una foto. CutTrack calcula y lo añade.</p>
+          </div>
+          <div class="food-capture-actions">
+            <button class="camera-action" id="camera-shortcut" type="button"><span aria-hidden="true">◎</span> Foto</button>
+            <button class="text-action" id="text-shortcut" type="button"><span aria-hidden="true">✦</span> Escribir</button>
+          </div>
+        </article>
+
+        <section class="today-food-section">
+          <div class="section-heading compact-heading">
+            <div><p class="eyebrow">HOY</p><h2>Comidas y bebidas</h2></div>
+            <strong id="today-food-total">0 kcal</strong>
+          </div>
+          <div class="food-list" id="today-food-list"></div>
+        </section>
 
         <div class="section-heading">
           <div>
@@ -125,12 +145,17 @@
 
       <section class="view" id="view-log" data-view="log">
         <div class="page-title">
-          <p class="eyebrow">CHECK-IN</p>
-          <h1>Registrar el día</h1>
-          <p>Completa lo que tengas. Puedes volver y editarlo.</p>
+          <p class="eyebrow">REGISTRO</p>
+          <h1>Lo que has tomado</h1>
+          <p>La comida se suma sola. Peso, pasos y sueño llegan desde Apple Salud.</p>
         </div>
 
-        <form class="log-form" id="daily-form">
+        <button class="primary-button food-main-action" id="log-food-button" type="button">✦ Añadir con foto o texto</button>
+        <div class="food-list full-food-list" id="all-food-list"></div>
+
+        <details class="manual-fallback">
+          <summary>Ajuste manual de calorías del día</summary>
+          <form class="log-form" id="daily-form">
           <article class="card form-card">
             <label>Fecha<input id="entry-date" name="date" type="date" required></label>
             <div class="field-grid">
@@ -138,29 +163,10 @@
               <label>Proteína, g<input name="protein" inputmode="decimal" type="number" min="0" max="1000" placeholder="180"></label>
             </div>
           </article>
-
-          <article class="card form-card">
-            <h2>Cuerpo</h2>
-            <div class="field-grid">
-              <label>Peso, kg<input name="weight" inputmode="decimal" type="number" min="30" max="300" step="0.1" placeholder="80,0"></label>
-              <label>Grasa, %<input name="bodyFat" inputmode="decimal" type="number" min="3" max="70" step="0.1" placeholder="20"></label>
-            </div>
-          </article>
-
-          <article class="card form-card">
-          <h2>Apple Salud</h2>
-          <p class="form-help">La app del iPhone sincroniza estos valores. También puedes corregirlos manualmente si todavía no ha llegado el dato.</p>
-            <div class="field-grid">
-              <label>Energía activa<input name="activeEnergy" inputmode="decimal" type="number" min="0" max="10000" placeholder="650"></label>
-              <label>Energía basal<input name="basalEnergy" inputmode="decimal" type="number" min="0" max="10000" placeholder="1950"></label>
-              <label>Pasos<input name="steps" inputmode="numeric" type="number" min="0" max="100000" placeholder="8500"></label>
-              <label>Sueño, h<input name="sleep" inputmode="decimal" type="number" min="0" max="24" step="0.1" placeholder="7,5"></label>
-            </div>
-          </article>
-
           <button class="primary-button" type="submit">Guardar día</button>
           <button class="text-button danger hidden" id="delete-entry" type="button">Eliminar este día</button>
-        </form>
+          </form>
+        </details>
       </section>
 
       <section class="view" id="view-settings" data-view="settings">
@@ -184,9 +190,10 @@
 
           <article class="card form-card">
             <h2>Punto de partida</h2>
+            <p class="form-help">No necesitas rellenarlo. Apple Salud sustituye estos valores cuando sincroniza peso y grasa corporal.</p>
             <div class="field-grid">
-              <label>Peso actual, kg<input name="currentWeight" type="number" min="30" max="300" step="0.1" required></label>
-              <label>Grasa actual, %<input name="currentBodyFat" type="number" min="3" max="70" step="0.1" required></label>
+              <label>Peso de respaldo, kg<input name="currentWeight" type="number" min="30" max="300" step="0.1"></label>
+              <label>Grasa de respaldo, %<input name="currentBodyFat" type="number" min="3" max="70" step="0.1"></label>
             </div>
           </article>
           <button class="primary-button" type="submit">Guardar ajustes</button>
@@ -221,12 +228,10 @@
       </section>
     </main>
 
-    <button class="quick-add" id="quick-add" type="button"><span>+</span> Registrar</button>
-
     <nav class="tabbar" aria-label="Navegación principal">
       <button class="active" data-target="today" type="button"><span>▥</span>Hoy</button>
       <button data-target="progress" type="button"><span>⌁</span>Progreso</button>
-      <button data-target="log" type="button"><span>＋</span>Registrar</button>
+      <button data-target="log" type="button"><span>＋</span>Comidas</button>
       <button data-target="settings" type="button"><span>⚙</span>Ajustes</button>
     </nav>
   </div>
@@ -253,8 +258,6 @@
       <h1>Hazlo tuyo</h1>
       <p>Estos valores se guardan en tu cuenta privada y se copian en este iPhone para funcionar sin conexión.</p>
       <div class="field-grid">
-        <label>Peso actual, kg<input name="currentWeight" type="number" min="30" max="300" step="0.1" placeholder="80,0" required></label>
-        <label>Grasa actual, %<input name="currentBodyFat" type="number" min="3" max="70" step="0.1" placeholder="20" required></label>
         <label>Calorías objetivo<input name="calorieTarget" type="number" min="800" max="6000" value="1900" required></label>
         <label>Proteína objetivo<input name="proteinTarget" type="number" min="20" max="500" value="180" required></label>
         <label>Gasto estimado<input name="tdeeEstimate" type="number" min="1000" max="7000" value="2600" required></label>
@@ -262,6 +265,55 @@
       </div>
       <button class="primary-button" value="save">Empezar</button>
       <button class="text-button" id="load-demo" type="button">Ver con datos de ejemplo</button>
+    </form>
+  </dialog>
+
+  <dialog id="food-dialog" class="sheet food-sheet">
+    <form id="food-capture-form">
+      <div class="sheet-handle"></div>
+      <p class="eyebrow">AÑADIR CON IA</p>
+      <h1>¿Qué has comido o bebido?</h1>
+      <p>Escríbelo como lo dirías normalmente o haz una foto.</p>
+
+      <div class="capture-preview hidden" id="capture-preview-wrap">
+        <img id="capture-preview" alt="Foto que se analizará">
+        <button class="preview-remove" id="remove-capture-photo" type="button" aria-label="Quitar foto">×</button>
+      </div>
+
+      <textarea id="food-text" name="foodText" rows="3" maxlength="1000" placeholder="Ejemplo: tres tercios Amstel y una bolsa pequeña de patatas"></textarea>
+      <input class="visually-hidden" id="food-camera-input" type="file" accept="image/*" capture="environment">
+      <input class="visually-hidden" id="food-library-input" type="file" accept="image/*">
+
+      <div class="capture-buttons">
+        <button class="secondary-button" id="capture-camera" type="button">◎ Hacer foto</button>
+        <button class="secondary-button" id="capture-library" type="button">▧ Fototeca</button>
+      </div>
+
+      <p class="analysis-status" id="food-analysis-status" role="status"></p>
+      <button class="primary-button analyze-button" id="analyze-food" type="submit"><span>✦</span> Analizar y añadir</button>
+      <button class="text-button close-food-dialog" type="button">Cancelar</button>
+      <p class="form-help">La estimación se guarda automáticamente. Podrás tocar el registro para corregir cualquier dato.</p>
+    </form>
+  </dialog>
+
+  <dialog id="food-edit-dialog" class="sheet food-sheet">
+    <form id="food-edit-form">
+      <div class="sheet-handle"></div>
+      <p class="eyebrow">CORREGIR REGISTRO</p>
+      <h1>Revisa la estimación</h1>
+      <input name="id" type="hidden">
+      <label>Nombre<input name="name" maxlength="180" required></label>
+      <label>Cantidad<input name="amountDescription" maxlength="500"></label>
+      <div class="field-grid nutrient-edit-grid">
+        <label>Calorías<input name="calories" type="number" min="0" max="10000" step="1" required></label>
+        <label>Proteína, g<input name="protein" type="number" min="0" max="1000" step="0.1" required></label>
+        <label>Carbohidratos, g<input name="carbohydrates" type="number" min="0" max="1000" step="0.1" required></label>
+        <label>Grasa, g<input name="fat" type="number" min="0" max="1000" step="0.1" required></label>
+      </div>
+      <p class="form-help" id="food-assumptions"></p>
+      <button class="primary-button" type="submit">Guardar corrección</button>
+      <button class="text-button danger" id="delete-food" type="button">Eliminar registro</button>
+      <button class="text-button close-food-edit" type="button">Cancelar</button>
     </form>
   </dialog>
 
