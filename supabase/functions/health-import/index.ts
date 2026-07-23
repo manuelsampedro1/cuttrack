@@ -28,6 +28,40 @@ function bytesToBase64URL(bytes) {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+async function encryptionKey(encoded) {
+  const bytes = base64ToBytes(encoded);
+  if (bytes.length !== 32) throw new Error("invalid encryption key");
+  return crypto.subtle.importKey("raw", bytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function encryptSecret(secret, encodedKey) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await encryptionKey(encodedKey);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(secret));
+  return { encrypted: bytesToBase64(new Uint8Array(encrypted)), iv: bytesToBase64(iv) };
+}
+
+async function decryptSecret(encrypted, iv, encodedKey) {
+  const key = await encryptionKey(encodedKey);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(iv) },
+    key,
+    base64ToBytes(encrypted),
+  );
+  return new TextDecoder().decode(plain);
+}
+
 async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -70,29 +104,47 @@ async function manageIntegration(request, body, env, origin) {
   const action = String(body?.action ?? "status");
   const filter = `integration_secrets?user_id=eq.${encodeURIComponent(user.id)}&provider=eq.health_auto_export`;
 
-  if (action === "create") {
-    const token = bytesToBase64URL(crypto.getRandomValues(new Uint8Array(32)));
-    const tokenHash = await sha256(token);
-    await serviceRequest(env.supabaseURL, env.serviceKey, "integration_secrets?on_conflict=user_id,provider", {
-      method: "POST",
-      prefer: "resolution=merge-duplicates,return=minimal",
-      body: {
-        user_id: user.id,
-        provider: "health_auto_export",
-        token_hash: tokenHash,
-        encrypted_secret: null,
-        secret_iv: null,
-        status: "connected",
-        last_sync_at: null,
-        last_error: null,
-        metadata: { configured_by: "pwa" },
-      },
-    });
+  const rows = await serviceRequest(
+    env.supabaseURL,
+    env.serviceKey,
+    `${filter}&select=status,last_sync_at,last_error,encrypted_secret,secret_iv,metadata`,
+  );
+  let integration = rows?.[0] ?? null;
+
+  if (["create", "configuration", "rotate"].includes(action)) {
+    let token = null;
+    if (action !== "rotate" && integration?.encrypted_secret && integration?.secret_iv) {
+      token = await decryptSecret(integration.encrypted_secret, integration.secret_iv, env.encryptionKey);
+    }
+    if (!token) {
+      token = bytesToBase64URL(crypto.getRandomValues(new Uint8Array(32)));
+      const tokenHash = await sha256(token);
+      const secret = await encryptSecret(token, env.encryptionKey);
+      const lastSyncAt = action === "rotate" ? null : integration?.last_sync_at ?? null;
+      await serviceRequest(env.supabaseURL, env.serviceKey, "integration_secrets?on_conflict=user_id,provider", {
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=minimal",
+        body: {
+          user_id: user.id,
+          provider: "health_auto_export",
+          token_hash: tokenHash,
+          encrypted_secret: secret.encrypted,
+          secret_iv: secret.iv,
+          status: "connected",
+          last_sync_at: lastSyncAt,
+          last_error: null,
+          metadata: { configured_by: "pwa", setup_version: 2 },
+        },
+      });
+      integration = { ...integration, status: "connected", last_sync_at: lastSyncAt, last_error: null };
+    }
     return respond({
       token,
       endpoint: `${env.supabaseURL}/functions/v1/health-import`,
-      connected: true,
-      last_sync_at: null,
+      configured: true,
+      connected: Boolean(integration?.last_sync_at),
+      status: integration?.last_sync_at ? "connected" : "setup_pending",
+      last_sync_at: integration?.last_sync_at ?? null,
     }, 200, origin);
   }
 
@@ -101,14 +153,10 @@ async function manageIntegration(request, body, env, origin) {
     return respond({ connected: false, last_sync_at: null }, 200, origin);
   }
 
-  const rows = await serviceRequest(
-    env.supabaseURL,
-    env.serviceKey,
-    `${filter}&select=status,last_sync_at,last_error`,
-  );
-  const integration = rows?.[0] ?? null;
   return respond({
-    connected: integration?.status === "connected",
+    configured: Boolean(integration),
+    connected: Boolean(integration?.last_sync_at) && integration?.status === "connected",
+    status: integration?.status === "error" ? "error" : integration?.last_sync_at ? "connected" : integration ? "setup_pending" : "disconnected",
     last_sync_at: integration?.last_sync_at ?? null,
     last_error: integration?.last_error ?? null,
   }, 200, origin);
@@ -178,8 +226,9 @@ Deno.serve(async (request) => {
     supabaseURL: Deno.env.get("SUPABASE_URL"),
     publishableKey: Deno.env.get("SUPABASE_ANON_KEY"),
     serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+    encryptionKey: Deno.env.get("INTEGRATION_ENCRYPTION_KEY"),
   };
-  if (!env.supabaseURL || !env.publishableKey || !env.serviceKey) {
+  if (!env.supabaseURL || !env.publishableKey || !env.serviceKey || !env.encryptionKey) {
     return respond({ error: "service unavailable" }, 503, origin);
   }
 

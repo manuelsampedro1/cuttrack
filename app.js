@@ -18,6 +18,7 @@ import { localDay, mealLabel, normalizeFoodAnalysis, totalsForDay, totalsForFood
 const LEGACY_STORAGE_KEY = "cuttrack.v1";
 const STORAGE_KEY = "cuttrack.cache.v1";
 const HEALTH_EXPORT_TOKEN_KEY = "cuttrack.health-export.v1";
+const HEALTH_WORKOUTS_SETUP_KEY = "cuttrack.health-workouts.v1";
 const defaultState = {
   version: 1,
   configured: false,
@@ -37,8 +38,10 @@ const defaultState = {
 let state = loadState();
 let deferredInstallPrompt = null;
 let cloudSyncPromise = null;
-let selectedFoodImage = null;
+let selectedFoodImages = [];
 let pendingFoodReview = null;
+let reviewImageIndex = 0;
+const integrationState = { health: {}, hevy: {} };
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -52,6 +55,10 @@ function storageKey() {
 
 function healthExportTokenKey() {
   return `${HEALTH_EXPORT_TOKEN_KEY}.${cloud.user?.id ?? "signed-out"}`;
+}
+
+function healthWorkoutsSetupKey() {
+  return `${HEALTH_WORKOUTS_SETUP_KEY}.${cloud.user?.id ?? "signed-out"}`;
 }
 
 function parseState(raw) {
@@ -171,6 +178,29 @@ function renderFoods() {
   $("#all-food-list").innerHTML = foods.length
     ? foods.slice(0, 60).map(food => foodRow(food, { includeDate: true })).join("")
     : `<p class="empty-state">Todavía no hay comidas. La primera se añadirá aquí automáticamente.</p>`;
+  updateSyncGlance(todayFoods.length > 0);
+}
+
+function updateSyncGlance(hasFoodToday = state.foods.some(food => !food.deletedAt && localDay(food.consumedAt) === todayISO())) {
+  const health = integrationState.health ?? {};
+  const hevy = integrationState.hevy ?? {};
+  const healthPill = $("#health-glance");
+  const hevyPill = $("#hevy-glance");
+  const foodPill = $("#food-glance");
+  if (!healthPill || !hevyPill || !foodPill) return;
+  healthPill.className = `source-pill${health.connected ? " ready" : health.configured ? " pending" : ""}`;
+  hevyPill.className = `source-pill${hevy.connected ? " ready" : ""}`;
+  foodPill.className = `source-pill${hasFoodToday ? " ready" : ""}`;
+  const ready = [Boolean(health.connected), Boolean(hevy.connected), hasFoodToday].filter(Boolean).length;
+  $("#sync-glance-title").textContent = ready === 3
+    ? "Todo al día"
+    : !health.configured
+      ? "Falta preparar Apple Salud"
+      : !health.connected
+        ? "Falta el primer envío de Salud"
+        : !hasFoodToday
+          ? "Falta registrar la comida de hoy"
+          : `${ready} de 3 fuentes listas`;
 }
 
 function projectionDate(projection) {
@@ -393,13 +423,32 @@ function updateLocalNutrition(day) {
   });
 }
 
-function clearSelectedFoodImage() {
-  if (selectedFoodImage?.previewURL) URL.revokeObjectURL(selectedFoodImage.previewURL);
-  selectedFoodImage = null;
+function renderCapturePreviews() {
+  const wrap = $("#capture-preview-wrap");
+  wrap.classList.toggle("hidden", !selectedFoodImages.length);
+  wrap.innerHTML = selectedFoodImages.map((image, index) => `<div class="capture-preview-card">
+    <img src="${escapeHTML(image.previewURL)}" alt="${index ? "Segundo ángulo o etiqueta" : "Foto principal del plato"}">
+    <small>${index ? "Ángulo 2 o etiqueta" : "Foto principal"}</small>
+    <button class="preview-remove" data-remove-food-image="${index}" type="button" aria-label="Quitar foto ${index + 1}">×</button>
+  </div>`).join("");
+  $("#capture-camera").textContent = selectedFoodImages.length ? "◎ Otro ángulo" : "◎ Hacer foto";
+  $("#capture-library").textContent = selectedFoodImages.length ? "▧ Añadir etiqueta" : "▧ Foto o etiqueta";
+  $("#capture-camera").disabled = selectedFoodImages.length >= 2;
+  $("#capture-library").disabled = selectedFoodImages.length >= 2;
+}
+
+function clearSelectedFoodImages() {
+  selectedFoodImages.forEach(image => image.previewURL && URL.revokeObjectURL(image.previewURL));
+  selectedFoodImages = [];
   $("#food-camera-input").value = "";
   $("#food-library-input").value = "";
-  $("#capture-preview-wrap").classList.add("hidden");
-  $("#capture-preview").removeAttribute("src");
+  renderCapturePreviews();
+}
+
+function removeSelectedFoodImage(index) {
+  const [removed] = selectedFoodImages.splice(index, 1);
+  if (removed?.previewURL) URL.revokeObjectURL(removed.previewURL);
+  renderCapturePreviews();
 }
 
 function openFoodDialog({ camera = false } = {}) {
@@ -407,7 +456,7 @@ function openFoodDialog({ camera = false } = {}) {
     showAuthDialog();
     return;
   }
-  clearSelectedFoodImage();
+  clearSelectedFoodImages();
   $("#food-capture-form").reset();
   $("#food-analysis-status").textContent = "";
   const dialog = $("#food-dialog");
@@ -422,13 +471,13 @@ async function compressFoodImage(file) {
     const image = new Image();
     image.src = objectURL;
     await image.decode();
-    const maxDimension = 1600;
+    const maxDimension = 2048;
     const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
     canvas.getContext("2d", { alpha: false }).drawImage(image, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("No se pudo preparar la foto")), "image/jpeg", 0.78));
+    const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("No se pudo preparar la foto")), "image/jpeg", 0.84));
     const base64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
@@ -443,23 +492,26 @@ async function compressFoodImage(file) {
 
 async function selectFoodImage(file) {
   if (!file) return;
+  if (selectedFoodImages.length >= 2) return showToast("Puedes usar hasta dos fotos por registro.");
   $("#food-analysis-status").textContent = "Preparando foto…";
   try {
-    clearSelectedFoodImage();
-    selectedFoodImage = await compressFoodImage(file);
-    $("#capture-preview").src = selectedFoodImage.previewURL;
-    $("#capture-preview-wrap").classList.remove("hidden");
-    $("#food-analysis-status").textContent = "Foto lista. Separando componentes…";
-    await analyzeAndAddFood();
+    selectedFoodImages.push(await compressFoodImage(file));
+    renderCapturePreviews();
+    $("#food-analysis-status").textContent = selectedFoodImages.length === 1
+      ? "Foto lista. Añade otro ángulo o pulsa Analizar plato."
+      : "Dos imágenes listas. La IA las cruzará sin duplicar alimentos.";
   } catch (error) {
     $("#food-analysis-status").textContent = error.message;
+  } finally {
+    $("#food-camera-input").value = "";
+    $("#food-library-input").value = "";
   }
 }
 
 async function analyzeAndAddFood(event) {
   event?.preventDefault();
   const text = $("#food-text").value.trim();
-  if (!text && !selectedFoodImage) {
+  if (!text && !selectedFoodImages.length) {
     $("#food-analysis-status").textContent = "Escribe algo o añade una foto.";
     return;
   }
@@ -471,19 +523,20 @@ async function analyzeAndAddFood(event) {
   try {
     const raw = await cloud.analyzeFood({
       text,
-      imageBase64: selectedFoodImage?.base64 ?? "",
-      mimeType: selectedFoodImage?.mimeType ?? "image/jpeg"
+      images: selectedFoodImages
     });
     const analysis = normalizeFoodAnalysis(raw);
     pendingFoodReview = {
       ...analysis,
       items: analysis.items.map(item => ({ ...item, id: crypto.randomUUID() })),
-      source: selectedFoodImage ? "photo_ai" : "text_ai",
+      source: selectedFoodImages.length ? "photo_ai" : "text_ai",
       inputText: text,
-      selectedImage: selectedFoodImage,
+      selectedImages: [...selectedFoodImages],
       imagePath: null,
+      imagePaths: [],
       editingID: null
     };
+    reviewImageIndex = 0;
     $("#food-dialog").close();
     renderFoodReview();
     $("#food-review-dialog").showModal();
@@ -536,12 +589,19 @@ function renderFoodReview() {
     : `<p class="empty-state">El plato no puede guardarse sin al menos un componente.</p>`;
   const photo = $("#food-review-photo");
   const image = $("#food-review-image");
-  const previewURL = pendingFoodReview.selectedImage?.previewURL ?? pendingFoodReview.previewURL;
+  const previewURLs = pendingFoodReview.selectedImages?.map(item => item.previewURL)
+    ?? pendingFoodReview.previewURLs
+    ?? (pendingFoodReview.previewURL ? [pendingFoodReview.previewURL] : []);
+  reviewImageIndex = Math.max(0, Math.min(previewURLs.length - 1, reviewImageIndex));
+  const previewURL = previewURLs[reviewImageIndex];
   photo.classList.toggle("hidden", !previewURL);
   if (previewURL) image.src = previewURL;
   else image.removeAttribute("src");
+  const angleTabs = $("#food-review-angle-tabs");
+  angleTabs.classList.toggle("hidden", previewURLs.length < 2);
+  angleTabs.innerHTML = previewURLs.map((_, index) => `<button class="${index === reviewImageIndex ? "active" : ""}" data-review-image="${index}" type="button">${index ? "Ángulo 2 o etiqueta" : "Foto principal"}</button>`).join("");
   $("#food-review-boxes").innerHTML = pendingFoodReview.items.map((item, index) => {
-    if (!Array.isArray(item.box2d) || item.box2d.length !== 4) return "";
+    if (Number(item.imageIndex || 0) !== reviewImageIndex || !Array.isArray(item.box2d) || item.box2d.length !== 4) return "";
     const [top, left, bottom, right] = item.box2d;
     return `<div class="review-box" style="top:${top / 10}%;left:${left / 10}%;width:${(right - left) / 10}%;height:${(bottom - top) / 10}%"><span>${index + 1}</span></div>`;
   }).join("");
@@ -555,6 +615,7 @@ function renderFoodReview() {
     ? `Supuestos: ${pendingFoodReview.assumptions.join(" · ")}`
     : "Los pesos de una foto son estimaciones. El rango muestra la incertidumbre restante.";
   $("#food-review-form").querySelector("button[type=submit]").textContent = pendingFoodReview.editingID ? "Guardar cambios" : "Guardar plato";
+  $("#delete-reviewed-food").classList.toggle("hidden", !pendingFoodReview.editingID);
   updateFoodReviewSummary();
 }
 
@@ -589,10 +650,12 @@ async function saveReviewedFood(event) {
     const totals = reviewTotals();
     const existing = pendingFoodReview.editingID ? state.foods.find(item => item.id === pendingFoodReview.editingID) : null;
     const id = existing?.id ?? crypto.randomUUID();
-    let imagePath = pendingFoodReview.imagePath ?? existing?.imagePath ?? null;
-    if (!existing && pendingFoodReview.selectedImage) {
-      try { imagePath = await cloud.uploadFoodImage(pendingFoodReview.selectedImage.blob, id); } catch { imagePath = null; }
+    let imagePaths = pendingFoodReview.imagePaths ?? existing?.imagePaths ?? (existing?.imagePath ? [existing.imagePath] : []);
+    if (!existing && pendingFoodReview.selectedImages?.length) {
+      const uploaded = await Promise.allSettled(pendingFoodReview.selectedImages.map((image, index) => cloud.uploadFoodImage(image.blob, id, index)));
+      imagePaths = uploaded.filter(result => result.status === "fulfilled").map(result => result.value);
     }
+    const imagePath = imagePaths[0] ?? null;
     const food = {
       id,
       consumedAt: existing?.consumedAt ?? new Date().toISOString(),
@@ -609,6 +672,7 @@ async function saveReviewedFood(event) {
       source: pendingFoodReview.source,
       inputText: pendingFoodReview.inputText,
       imagePath,
+      imagePaths,
       assumptions: pendingFoodReview.assumptions,
       referenceObject: pendingFoodReview.referenceObject,
       items: pendingFoodReview.items.map(({ id: itemID, ...item }) => ({ id: itemID, ...item })),
@@ -621,7 +685,7 @@ async function saveReviewedFood(event) {
     const saved = await cloud.mutate("food-upsert", food);
     $("#food-review-dialog").close();
     pendingFoodReview = null;
-    clearSelectedFoodImage();
+    clearSelectedFoodImages();
     $("#food-capture-form").reset();
     renderAll();
     showToast(saved ? `${formatNumber(food.calories)} kcal guardadas con ${food.items.length} componentes.` : "Registro guardado. Se sincronizará al recuperar conexión.");
@@ -639,6 +703,22 @@ function returnToFoodCapture() {
   if (!wasEditing) $("#food-dialog").showModal();
 }
 
+async function deleteReviewedFood() {
+  const food = state.foods.find(item => item.id === pendingFoodReview?.editingID);
+  if (!food || !confirm(`¿Eliminar ${food.name} completo?`)) return;
+  const day = localDay(food.consumedAt);
+  state.foods = state.foods.filter(item => item.id !== food.id);
+  updateLocalNutrition(day);
+  saveState();
+  await cloud.mutate("food-delete", { id: food.id });
+  const paths = food.imagePaths?.length ? food.imagePaths : food.imagePath ? [food.imagePath] : [];
+  paths.forEach(path => cloud.deleteFoodImage(path).catch(() => {}));
+  $("#food-review-dialog").close();
+  pendingFoodReview = null;
+  renderAll();
+  showToast("Registro completo eliminado.");
+}
+
 function openFoodEditor(id) {
   const food = state.foods.find(item => item.id === id);
   if (!food) return;
@@ -647,14 +727,16 @@ function openFoodEditor(id) {
       ...structuredClone(food),
       items: structuredClone(food.items).map((item, index) => ({ ...item, id: item.id || `${food.id}-${index}` })),
       editingID: food.id,
-      selectedImage: null,
-      previewURL: null
+      selectedImages: null,
+      previewURLs: []
     };
+    reviewImageIndex = 0;
     renderFoodReview();
     $("#food-review-dialog").showModal();
-    if (food.imagePath) cloud.foodImageURL(food.imagePath).then(url => {
-      if (!pendingFoodReview || pendingFoodReview.editingID !== food.id || !url) return;
-      pendingFoodReview.previewURL = url;
+    const paths = food.imagePaths?.length ? food.imagePaths : food.imagePath ? [food.imagePath] : [];
+    if (paths.length) Promise.all(paths.map(path => cloud.foodImageURL(path))).then(urls => {
+      if (!pendingFoodReview || pendingFoodReview.editingID !== food.id) return;
+      pendingFoodReview.previewURLs = urls.filter(Boolean);
       renderFoodReview();
     }).catch(() => {});
     return;
@@ -700,7 +782,8 @@ async function deleteSelectedFood() {
   updateLocalNutrition(day);
   saveState();
   await cloud.mutate("food-delete", { id });
-  if (food.imagePath) cloud.deleteFoodImage(food.imagePath).catch(() => {});
+  const paths = food.imagePaths?.length ? food.imagePaths : food.imagePath ? [food.imagePath] : [];
+  paths.forEach(path => cloud.deleteFoodImage(path).catch(() => {}));
   $("#food-edit-dialog").close();
   renderAll();
   showToast("Registro eliminado.");
@@ -721,14 +804,24 @@ function readableSyncDate(value) {
 
 function setIntegrationStatus(provider, payload = {}) {
   const connected = Boolean(payload.connected);
+  const configured = connected || Boolean(payload.configured);
   const error = payload.status === "error" || Boolean(payload.last_error);
+  integrationState[provider] = { ...payload, connected, configured };
   const dot = $(`#${provider}-connection-dot`);
-  dot.className = `connection-dot${error ? " error" : connected ? " connected" : ""}`;
-  $(`#${provider}-connection-title`).textContent = error ? "Necesita atención" : connected ? "Conectado" : "Sin conectar";
+  dot.className = `connection-dot${error ? " error" : connected ? " connected" : configured ? " pending" : ""}`;
+  $(`#${provider}-connection-title`).textContent = error
+    ? "Necesita atención"
+    : connected
+      ? provider === "health" ? "Recibiendo datos" : "Conectado"
+      : configured
+        ? "Preparado, falta el iPhone"
+        : "Sin preparar";
   $(`#${provider}-sync-status`).textContent = error
     ? String(payload.last_error || "La última sincronización falló.")
     : connected
       ? readableSyncDate(payload.last_sync_at)
+      : configured
+        ? "La nube está lista. Abre la configuración preparada en tu iPhone y acepta los permisos."
       : provider === "hevy"
         ? "Se sincronizará desde la nube aunque CutTrack esté cerrado."
         : "Todavía no se han recibido datos.";
@@ -736,6 +829,51 @@ function setIntegrationStatus(provider, payload = {}) {
     $("#hevy-connect-form").classList.toggle("hidden", connected);
     $("#hevy-connected-actions").classList.toggle("hidden", !connected);
   }
+  updateSyncReadiness();
+}
+
+function updateSyncReadiness() {
+  const health = integrationState.health ?? {};
+  const hevy = integrationState.hevy ?? {};
+  const cloudReady = cloud.isSignedIn;
+  const workoutsPrepared = localStorage.getItem(healthWorkoutsSetupKey()) === "true";
+  const checks = [cloudReady, Boolean(hevy.connected), Boolean(health.configured), Boolean(health.connected)];
+  const score = checks.filter(Boolean).length * 25;
+  const label = $("#sync-readiness-label");
+  const bar = $("#sync-readiness-bar");
+  if (label) label.textContent = score === 100 ? "Listo y recibiendo" : `${score}% preparado`;
+  if (bar) bar.style.width = `${score}%`;
+  const setCheck = (selector, ready) => {
+    const element = $(selector);
+    if (!element) return;
+    element.classList.toggle("ready", ready);
+    element.textContent = ready ? "✓" : element.dataset.step;
+  };
+  const cloudCheck = $("#health-cloud-check");
+  const metricsCheck = $("#health-metrics-check");
+  const workoutsCheck = $("#health-workouts-check");
+  if (cloudCheck && !cloudCheck.dataset.step) cloudCheck.dataset.step = "1";
+  if (metricsCheck && !metricsCheck.dataset.step) metricsCheck.dataset.step = "2";
+  if (workoutsCheck && !workoutsCheck.dataset.step) workoutsCheck.dataset.step = "3";
+  setCheck("#health-cloud-check", Boolean(health.configured));
+  setCheck("#health-metrics-check", Boolean(health.connected));
+  setCheck("#health-workouts-check", workoutsPrepared);
+  updateSyncGlance();
+}
+
+function cacheHealthConnection(connection) {
+  if (!connection?.token || !connection?.endpoint) return null;
+  const compact = { token: connection.token, endpoint: connection.endpoint };
+  localStorage.setItem(healthExportTokenKey(), JSON.stringify(compact));
+  updateHealthExportLink();
+  return compact;
+}
+
+async function ensureHealthConfiguration() {
+  const connection = await cloud.healthIntegration("configuration");
+  cacheHealthConnection(connection);
+  setIntegrationStatus("health", connection);
+  return connection;
 }
 
 async function refreshIntegrations() {
@@ -749,8 +887,16 @@ async function refreshIntegrations() {
     cloud.healthIntegration("status"),
     cloud.hevyIntegration("status")
   ]);
-  setIntegrationStatus("health", health.status === "fulfilled" ? health.value : { status: "error", last_error: health.reason?.message });
+  const healthPayload = health.status === "fulfilled" ? health.value : { status: "error", last_error: health.reason?.message };
+  setIntegrationStatus("health", healthPayload);
   setIntegrationStatus("hevy", hevy.status === "fulfilled" ? hevy.value : { status: "error", last_error: hevy.reason?.message });
+  if (health.status === "fulfilled" && healthPayload.configured && !localStorage.getItem(healthExportTokenKey())) {
+    try {
+      await ensureHealthConfiguration();
+    } catch (error) {
+      setIntegrationStatus("health", { ...healthPayload, status: "error", last_error: error.message });
+    }
+  }
 }
 
 async function syncAllIntegrations(event) {
@@ -821,10 +967,7 @@ async function setupHealthExport() {
   const button = $("#setup-health-export");
   button.disabled = true;
   try {
-    const connection = await cloud.healthIntegration("create");
-    localStorage.setItem(healthExportTokenKey(), JSON.stringify({ token: connection.token, endpoint: connection.endpoint }));
-    updateHealthExportLink();
-    setIntegrationStatus("health", connection);
+    const connection = await ensureHealthConfiguration();
     showToast("Abriendo la configuración de Salud…");
     window.location.href = healthExportLink(connection);
   } catch (error) {
@@ -834,19 +977,21 @@ async function setupHealthExport() {
   }
 }
 
-function setupHealthWorkouts() {
-  let connection;
+async function setupHealthWorkouts() {
+  if (!cloud.isSignedIn) return showAuthDialog();
+  const button = $("#setup-health-workouts");
+  button.disabled = true;
   try {
-    connection = JSON.parse(localStorage.getItem(healthExportTokenKey()));
-  } catch {
-    connection = null;
+    const connection = await ensureHealthConfiguration();
+    localStorage.setItem(healthWorkoutsSetupKey(), "true");
+    updateSyncReadiness();
+    showToast("Abriendo la configuración de entrenamientos…");
+    window.location.href = healthExportLink({ ...connection, workouts: true });
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
   }
-  if (!connection?.token || !connection?.endpoint) {
-    showToast("Pulsa primero Conectar datos de Salud.");
-    return;
-  }
-  showToast("Abriendo la configuración de entrenamientos…");
-  window.location.href = healthExportLink({ ...connection, workouts: true });
 }
 
 async function disconnectHealthExport() {
@@ -854,6 +999,7 @@ async function disconnectHealthExport() {
   try {
     const result = await cloud.healthIntegration("revoke");
     localStorage.removeItem(healthExportTokenKey());
+    localStorage.removeItem(healthWorkoutsSetupKey());
     updateHealthExportLink();
     setIntegrationStatus("health", result);
     showToast("Apple Salud desconectado.");
@@ -1019,10 +1165,20 @@ function bindEvents() {
   $("#capture-library").addEventListener("click", () => $("#food-library-input").click());
   $("#food-camera-input").addEventListener("change", event => selectFoodImage(event.target.files[0]));
   $("#food-library-input").addEventListener("change", event => selectFoodImage(event.target.files[0]));
-  $("#remove-capture-photo").addEventListener("click", clearSelectedFoodImage);
-  $(".close-food-dialog").addEventListener("click", () => { $("#food-dialog").close(); clearSelectedFoodImage(); });
+  $("#capture-preview-wrap").addEventListener("click", event => {
+    const button = event.target.closest("[data-remove-food-image]");
+    if (button) removeSelectedFoodImage(Number(button.dataset.removeFoodImage));
+  });
+  $(".close-food-dialog").addEventListener("click", () => { $("#food-dialog").close(); clearSelectedFoodImages(); });
   $("#food-review-form").addEventListener("submit", saveReviewedFood);
   $(".close-food-review").addEventListener("click", returnToFoodCapture);
+  $("#delete-reviewed-food").addEventListener("click", deleteReviewedFood);
+  $("#food-review-angle-tabs").addEventListener("click", event => {
+    const button = event.target.closest("[data-review-image]");
+    if (!button) return;
+    reviewImageIndex = Number(button.dataset.reviewImage);
+    renderFoodReview();
+  });
   $("#add-food-component").addEventListener("click", addFoodComponent);
   $("#food-component-list").addEventListener("click", event => {
     const button = event.target.closest("[data-delete-component]");
@@ -1033,7 +1189,7 @@ function bindEvents() {
   $("#food-component-list").addEventListener("input", event => {
     const input = event.target.closest("[data-component-field]");
     const component = event.target.closest("[data-component-id]");
-    if (!input || !component || !pendingFoodReview || input.dataset.componentField === "estimatedWeightG") return;
+    if (!input || !component || !pendingFoodReview) return;
     const item = pendingFoodReview.items.find(value => value.id === component.dataset.componentId);
     if (!item) return;
     const field = input.dataset.componentField;
@@ -1128,8 +1284,31 @@ function bindEvents() {
   });
   $("#sync-cloud").addEventListener("click", () => syncCloud());
   $("#sync-all-integrations").addEventListener("click", syncAllIntegrations);
+  $("#open-sync-settings").addEventListener("click", () => {
+    navigate("settings");
+    setTimeout(() => $("#sync-hub")?.scrollIntoView({ behavior: "smooth", block: "start" }), 180);
+  });
   $("#setup-health-export").addEventListener("click", setupHealthExport);
   $("#setup-health-workouts").addEventListener("click", setupHealthWorkouts);
+  $("#check-health-sync").addEventListener("click", async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Comprobando…";
+    try {
+      await refreshIntegrations();
+      if (integrationState.health.connected) {
+        await syncCloud({ quiet: true });
+        showToast("Apple Salud ya está enviando datos.");
+      } else {
+        showToast("Aún no llegó el primer envío. Abre Health Auto Export en el iPhone.");
+      }
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Comprobar si ya está recibiendo datos";
+    }
+  });
   $("#disconnect-health-export").addEventListener("click", disconnectHealthExport);
   $("#hevy-connect-form").addEventListener("submit", async event => {
     event.preventDefault();

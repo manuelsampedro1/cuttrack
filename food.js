@@ -46,7 +46,8 @@ export function normalizeFoodItem(value, index = 0) {
     fat: nutritionNumber(value.fat, 1000, "fat"),
     confidence: Math.max(0, Math.min(1, Number(value.confidence) || 0.5)),
     portionBasis: String(value.portion_basis ?? value.portionBasis ?? "Estimación visual").trim().slice(0, 180),
-    box2d: normalizeBox(value.box_2d ?? value.box2d)
+    box2d: normalizeBox(value.box_2d ?? value.box2d),
+    imageIndex: Math.max(0, Math.min(1, Math.round(Number(value.image_index ?? value.imageIndex) || 0)))
   };
 }
 
@@ -105,7 +106,8 @@ export function normalizeFoodAnalysis(value) {
       assumedWidthMm: boundedNumber(referenceValue.assumed_width_mm ?? referenceValue.assumedWidthMm, 1000),
       assumedHeightMm: boundedNumber(referenceValue.assumed_height_mm ?? referenceValue.assumedHeightMm, 1000),
       confidence: Math.max(0, Math.min(1, Number(referenceValue.confidence) || 0)),
-      samePlane: Boolean(referenceValue.same_plane ?? referenceValue.samePlane)
+      samePlane: Boolean(referenceValue.same_plane ?? referenceValue.samePlane),
+      imageIndex: Math.max(0, Math.min(1, Math.round(Number(referenceValue.image_index ?? referenceValue.imageIndex) || 0)))
     }
   };
 }

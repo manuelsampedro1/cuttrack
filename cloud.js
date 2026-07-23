@@ -136,11 +136,11 @@ export class CutTrackCloud {
     return payload;
   }
 
-  async analyzeFood({ text = "", imageBase64 = "", mimeType = "image/jpeg" }) {
+  async analyzeFood({ text = "", images = [], imageBase64 = "", mimeType = "image/jpeg" }) {
     return this.functionRequest("analyze-food", {
       text,
-      image_base64: imageBase64,
-      mime_type: mimeType,
+      images: images.map(image => ({ base64: image.base64, mime_type: image.mimeType })),
+      ...(images.length ? {} : { image_base64: imageBase64, mime_type: mimeType }),
       local_time: new Date().toISOString()
     });
   }
@@ -156,10 +156,11 @@ export class CutTrackCloud {
     });
   }
 
-  async uploadFoodImage(blob, foodID) {
+  async uploadFoodImage(blob, foodID, index = 0) {
     await this.ensureSession();
     const extension = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
-    const path = `${this.user.id}/${foodID}.${extension}`;
+    const suffix = index ? `-${index + 1}` : "";
+    const path = `${this.user.id}/${foodID}${suffix}.${extension}`;
     const response = await fetch(`${SUPABASE_URL}/storage/v1/object/food-images/${path}`, {
       method: "POST",
       headers: {
@@ -290,6 +291,7 @@ export class CutTrackCloud {
         source: payload.source,
         input_text: payload.inputText,
         image_path: payload.imagePath,
+        image_paths: payload.imagePaths ?? (payload.imagePath ? [payload.imagePath] : []),
         assumptions: payload.assumptions ?? [],
         items: payload.items ?? [],
         calories_low: payload.caloriesLow ?? payload.calories,
@@ -395,6 +397,7 @@ export class CutTrackCloud {
         source: row.source,
         inputText: row.input_text,
         imagePath: row.image_path,
+        imagePaths: Array.isArray(row.image_paths) && row.image_paths.length ? row.image_paths : row.image_path ? [row.image_path] : [],
         assumptions: row.assumptions ?? [],
         items: row.items ?? [],
         caloriesLow: row.calories_low === null ? Number(row.calories) : Number(row.calories_low),

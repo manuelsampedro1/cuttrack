@@ -15,7 +15,7 @@ test("normaliza la respuesta nutricional estructurada", () => {
     confidence: 0.93,
     meal: "snack",
     assumptions: ["Amstel Original"],
-    reference_object: { detected: false },
+    reference_object: { detected: false, image_index: 1 },
     items: [{
       name: "Cerveza Amstel",
       estimated_weight_g: 990,
@@ -27,7 +27,8 @@ test("normaliza la respuesta nutricional estructurada", () => {
       fat: 0,
       confidence: 0.93,
       portion_basis: "3 botellas de 330 ml",
-      box_2d: []
+      box_2d: [],
+      image_index: 1
     }]
   });
   assert.equal(result.calories, 429);
@@ -36,6 +37,8 @@ test("normaliza la respuesta nutricional estructurada", () => {
   assert.equal(result.items.length, 1);
   assert.equal(result.caloriesLow, 390);
   assert.equal(result.caloriesHigh, 470);
+  assert.equal(result.items[0].imageIndex, 1);
+  assert.equal(result.referenceObject.imageIndex, 1);
 });
 
 test("suma componentes y conserva sus rangos", () => {

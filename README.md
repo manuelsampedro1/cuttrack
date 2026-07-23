@@ -9,17 +9,18 @@ Supabase guarda la cuenta, los ajustes, los registros diarios y la réplica de A
 - Apple Salud: Health Auto Export envía por REST resúmenes de peso, grasa corporal, pasos, sueño, energía activa, energía basal y frecuencia cardiaca en reposo.
 - Garmin: Garmin Connect escribe sus métricas y actividades en Apple Salud. Health Auto Export usa la misma ruta de entrada de CutTrack.
 - Hevy: una Edge Function valida la clave oficial, la cifra con AES-GCM y sincroniza entrenamientos cada treinta minutos mediante Supabase Cron.
-- El webhook de Salud usa una clave aleatoria de escritura. En la base solo se guarda su hash y nunca permite leer el historial.
+- El webhook de Salud usa una clave aleatoria de escritura. La clave recuperable se cifra con AES-GCM, la validación usa un hash y nunca permite leer el historial.
 - La PWA genera un deep link que prepara Health Auto Export con endpoint, métricas, agregación diaria y frecuencia. iOS sigue decidiendo cuándo concede tiempo de segundo plano y no deja leer Salud mientras el dispositivo está bloqueado.
+- El panel separa tres estados: sin preparar, preparado en la nube y recibiendo datos. Cambiar de navegador no rota la clave ni rompe una automatización existente.
 
 El puente SwiftUI sigue disponible como alternativa local, pero ya no es necesario conectar el iPhone al Mac para alimentar la PWA.
 
 ## Registro automático de comida
 
-- Foto: se reduce a JPEG antes del envío. Gemini separa los componentes visibles, devuelve su región, estima gramos y calcula un rango calórico.
+- Fotos: admite una principal y un segundo ángulo o etiqueta. Se reducen a JPEG antes del envío y Gemini las cruza como un único consumo, sin duplicar alimentos.
 - Texto: acepta lenguaje cotidiano y marcas, por ejemplo `tres tercios Amstel`.
 - Un objeto conocido en el mismo plano, como una carcasa de AirPods, puede ayudar a estimar la escala. No elimina la incertidumbre sobre grosor, densidad, relleno o aceite.
-- Antes de guardar se pueden corregir gramos y macros, eliminar componentes o añadir otro con IA. Las regiones detectadas se numeran sobre la foto.
+- Antes de guardar se pueden corregir gramos y macros, eliminar componentes o añadir otro con IA. Las regiones detectadas se numeran sobre el ángulo donde mejor se ven.
 - El valor usado aplica un sesgo superior moderado dentro del rango plausible para reducir la infravaloración sin elegir sistemáticamente el máximo.
 - Cada resultado conserva componentes, calorías, rango, macros, confianza, referencia visual y supuestos principales.
 - La fila se puede tocar para volver a revisar. Una RPC recalcula el total del día de forma atómica.

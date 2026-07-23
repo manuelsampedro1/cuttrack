@@ -27,8 +27,9 @@ const schema = {
         assumed_height_mm: { type: "NUMBER" },
         confidence: { type: "NUMBER" },
         same_plane: { type: "BOOLEAN" },
+        image_index: { type: "INTEGER" },
       },
-      required: ["detected", "object", "assumed_width_mm", "assumed_height_mm", "confidence", "same_plane"],
+      required: ["detected", "object", "assumed_width_mm", "assumed_height_mm", "confidence", "same_plane", "image_index"],
     },
     items: {
       type: "ARRAY",
@@ -46,6 +47,7 @@ const schema = {
           confidence: { type: "NUMBER" },
           portion_basis: { type: "STRING" },
           box_2d: { type: "ARRAY", items: { type: "INTEGER" } },
+          image_index: { type: "INTEGER" },
         },
         required: [
           "name",
@@ -59,6 +61,7 @@ const schema = {
           "confidence",
           "portion_basis",
           "box_2d",
+          "image_index",
         ],
       },
     },
@@ -149,12 +152,17 @@ Deno.serve(async (request) => {
   }
 
   const text = String(body.text ?? "").trim().slice(0, 1000);
-  const imageBase64 = String(body.image_base64 ?? "");
-  const mimeType = String(body.mime_type ?? "image/jpeg");
+  const legacyImage = String(body.image_base64 ?? "");
+  const inputImages = Array.isArray(body.images) ? body.images.slice(0, 2) : [];
+  const images = inputImages.map((image: Record<string, unknown>) => ({
+    data: String(image?.base64 ?? image?.data ?? ""),
+    mimeType: String(image?.mime_type ?? image?.mimeType ?? "image/jpeg"),
+  })).filter((image) => image.data);
+  if (!images.length && legacyImage) images.push({ data: legacyImage, mimeType: String(body.mime_type ?? "image/jpeg") });
   const localTime = String(body.local_time ?? new Date().toISOString()).slice(0, 40);
-  if (!text && !imageBase64) return response({ error: "write a food or attach a photo" }, 400, origin);
-  if (imageBase64.length > 10_700_000) return response({ error: "image too large" }, 413, origin);
-  if (imageBase64 && !/^image\/(jpeg|png|webp|heic|heif)$/.test(mimeType)) {
+  if (!text && !images.length) return response({ error: "write a food or attach a photo" }, 400, origin);
+  if (images.reduce((total, image) => total + image.data.length, 0) > 16_000_000) return response({ error: "images too large" }, 413, origin);
+  if (images.some((image) => !/^image\/(jpeg|png|webp|heic|heif)$/.test(image.mimeType))) {
     return response({ error: "unsupported image" }, 415, origin);
   }
 
@@ -165,10 +173,13 @@ Reglas:
 - Interpreta lenguaje cotidiano, cantidades y marcas españolas. Por ejemplo, "tres tercios Amstel" significa 3 botellas de 330 ml de cerveza Amstel.
 - Si hay varias unidades, multiplica calorías y macros por el número total.
 - En fotos, crea un elemento por cada componente comestible distinguible. Separa guarniciones, salsas, aceite, bebidas y unidades repetidas cuando afecte a la corrección.
-- box_2d es la región visible de ese componente como [ymin, xmin, ymax, xmax], normalizada de 0 a 1000. Si solo hay texto, usa [0, 0, 0, 0].
+- Puede haber hasta dos imágenes del mismo consumo. La segunda es otro ángulo o una etiqueta. Úsalas juntas para reducir incertidumbre y nunca cuentes dos veces el mismo alimento.
+- Si una imagen muestra una etiqueta nutricional legible, prioriza sus valores exactos y escala por la cantidad consumida.
+- box_2d es la región visible de ese componente como [ymin, xmin, ymax, xmax], normalizada de 0 a 1000. image_index indica la imagen donde esa región se ve mejor, empezando por 0. Si solo hay texto, usa [0, 0, 0, 0] e image_index 0.
 - estimated_weight_g es el peso comestible total del componente, no el peso del recipiente. Estima volumen, densidad y parte oculta con prudencia.
 - Busca un objeto de escala conocido, como una carcasa de AirPods, una tarjeta o un cubierto. No lo incluyas como alimento. Solo úsalo para escala si su tipo es razonablemente identificable y está aproximadamente en el mismo plano que la comida.
 - Las carcasas de AirPods varían según el modelo. Si no identificas el modelo exacto, usa dimensiones aproximadas, baja reference_object.confidence y explícalo en assumptions.
+- reference_object.image_index indica la imagen donde la referencia se midió mejor.
 - Un objeto de referencia mejora la escala en el plano, pero no revela por sí solo el grosor, densidad, relleno, aceite absorbido ni comida oculta. Refleja esa incertidumbre en confidence y en el rango calórico.
 - Incluye aceite y salsas solo si son visibles, los menciona el usuario o son muy probables por la preparación. Cuando sean probables pero no demostrables, indícalo como supuesto.
 - portion_basis explica brevemente de dónde sale el peso: referencia visual, unidad conocida, etiqueta, tamaño del plato o densidad habitual.
@@ -186,8 +197,11 @@ Hora local: ${localTime}
 Texto del usuario: ${text || "Sin texto, usa la imagen."}
 `;
 
-  const parts: Record<string, unknown>[] = [{ text: prompt }];
-  if (imageBase64) parts.push({ inline_data: { mime_type: mimeType, data: imageBase64 } });
+  const parts: Record<string, unknown>[] = [{ text: `${prompt}\nNúmero de imágenes: ${images.length}.` }];
+  images.forEach((image, index) => {
+    parts.push({ text: `Imagen ${index + 1} del mismo consumo:` });
+    parts.push({ inline_data: { mime_type: image.mimeType, data: image.data } });
+  });
 
   let geminiResponse: Response | null = null;
   for (const model of ["gemini-3.5-flash", "gemini-2.5-flash"]) {
@@ -231,6 +245,7 @@ Texto del usuario: ${text || "Sin texto, usa la imagen."}
       confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.5)),
       portion_basis: String(item.portion_basis ?? "Estimación visual").trim().slice(0, 180),
       box_2d: normalizedBox(item.box_2d),
+      image_index: Math.max(0, Math.min(images.length - 1, Math.round(Number(item.image_index) || 0))),
     }));
     if (!items.length) throw new Error("analysis returned no items");
     for (const item of items) {
@@ -268,6 +283,7 @@ Texto del usuario: ${text || "Sin texto, usa la imagen."}
         assumed_height_mm: finite(referenceObject.assumed_height_mm ?? 0, 0, 1000),
         confidence: Math.max(0, Math.min(1, Number(referenceObject.confidence) || 0)),
         same_plane: Boolean(referenceObject.same_plane),
+        image_index: Math.max(0, Math.min(images.length - 1, Math.round(Number(referenceObject.image_index) || 0))),
       },
       items,
     }, 200, origin);

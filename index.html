@@ -45,6 +45,16 @@
 
         <div class="metric-grid" id="today-metrics"></div>
 
+        <button class="sync-glance card" id="open-sync-settings" type="button">
+          <span class="sync-glance-copy"><small>FUENTES DE HOY</small><strong id="sync-glance-title">Comprobando tus datos</strong></span>
+          <span class="sync-glance-pills">
+            <span class="source-pill" id="health-glance"><i></i>Salud</span>
+            <span class="source-pill" id="hevy-glance"><i></i>Hevy</span>
+            <span class="source-pill" id="food-glance"><i></i>Comida</span>
+          </span>
+          <span class="sync-glance-arrow" aria-hidden="true">›</span>
+        </button>
+
         <article class="card food-capture-card">
           <div>
             <p class="eyebrow">REGISTRO CON IA</p>
@@ -206,8 +216,12 @@
           <button class="text-button" id="sign-out" type="button">Cerrar sesión</button>
         </article>
 
-        <article class="card integration-card sync-hub">
+        <article class="card integration-card sync-hub" id="sync-hub">
           <div class="integration-heading"><span aria-hidden="true">↻</span><div><h2>Sincronizaciones</h2><p>Salud, Garmin y entrenamientos, en el mismo sitio.</p></div></div>
+          <div class="sync-readiness">
+            <div><span>Preparación</span><strong id="sync-readiness-label">Comprobando…</strong></div>
+            <div class="sync-readiness-track"><i id="sync-readiness-bar"></i></div>
+          </div>
           <button class="primary-button" id="sync-all-integrations" type="button">Actualizar todo ahora</button>
 
           <section class="sync-provider">
@@ -216,10 +230,16 @@
               <span class="connection-dot" id="health-connection-dot" aria-hidden="true"></span>
               <div><strong id="health-connection-title">Sin conectar</strong><small id="health-sync-status">Todavía no se han recibido datos.</small></div>
             </div>
+            <div class="setup-checklist">
+              <div><i id="health-cloud-check">1</i><span><strong>Conexión privada</strong><small>CutTrack prepara el destino y la clave.</small></span></div>
+              <div><i id="health-metrics-check">2</i><span><strong>Datos diarios</strong><small>Peso, grasa, pasos, sueño y energía.</small></span></div>
+              <div><i id="health-workouts-check">3</i><span><strong>Garmin y entrenamientos</strong><small>Garmin Connect escribe en Apple Salud.</small></span></div>
+            </div>
             <a class="secondary-button external-button" href="https://apps.apple.com/app/health-auto-export-json-csv/id1115567069" target="_blank" rel="noreferrer">Instalar Health Auto Export</a>
-            <button class="secondary-button" id="setup-health-export" type="button">1. Conectar datos de Salud</button>
-            <a class="secondary-button external-button hidden" id="open-health-export" href="#">Abrir configuración preparada</a>
-            <button class="secondary-button" id="setup-health-workouts" type="button">2. Añadir Garmin desde Salud</button>
+            <button class="primary-button" id="setup-health-export" type="button">Preparar datos diarios</button>
+            <a class="secondary-button external-button hidden" id="open-health-export" href="#">Abrir datos diarios preparados</a>
+            <button class="secondary-button" id="setup-health-workouts" type="button">Preparar Garmin y entrenamientos</button>
+            <button class="text-button" id="check-health-sync" type="button">Comprobar si ya está recibiendo datos</button>
             <details class="integration-details">
               <summary>Cómo funciona</summary>
               <p>La configuración preparada envía peso, grasa, pasos, sueño y energía. Garmin Connect escribe los entrenamientos en Salud. La automatización en segundo plano requiere el plan Premium de Health Auto Export.</p>
@@ -309,10 +329,7 @@
       <h1>¿Qué has comido o bebido?</h1>
       <p>Haz una foto clara o escríbelo como lo dirías normalmente.</p>
 
-      <div class="capture-preview hidden" id="capture-preview-wrap">
-        <img id="capture-preview" alt="Foto que se analizará">
-        <button class="preview-remove" id="remove-capture-photo" type="button" aria-label="Quitar foto">×</button>
-      </div>
+      <div class="capture-preview-grid hidden" id="capture-preview-wrap"></div>
 
       <textarea id="food-text" name="foodText" rows="3" maxlength="1000" placeholder="Ejemplo: tres tercios Amstel y una bolsa pequeña de patatas"></textarea>
       <input class="visually-hidden" id="food-camera-input" type="file" accept="image/*" capture="environment">
@@ -320,10 +337,10 @@
 
       <div class="capture-buttons">
         <button class="secondary-button" id="capture-camera" type="button">◎ Hacer foto</button>
-        <button class="secondary-button" id="capture-library" type="button">▧ Fototeca</button>
+        <button class="secondary-button" id="capture-library" type="button">▧ Foto o etiqueta</button>
       </div>
 
-      <div class="capture-tip"><strong>Para medir mejor</strong><span>Foto cenital, plato entero y un objeto conocido en la misma superficie. Si usas una carcasa de AirPods, indica el modelo si lo sabes.</span></div>
+      <div class="capture-tip"><strong>Para medir mejor</strong><span>Primera foto cenital. Añade un segundo ángulo o la etiqueta. Pon la carcasa de AirPods en la misma superficie e indica el modelo si lo sabes.</span></div>
 
       <p class="analysis-status" id="food-analysis-status" role="status"></p>
       <button class="primary-button analyze-button" id="analyze-food" type="submit"><span>✦</span> Analizar plato</button>
@@ -338,6 +355,8 @@
       <p class="eyebrow">REVISIÓN ANTES DE GUARDAR</p>
       <h1>Comprueba el plato</h1>
       <p>La IA separa lo visible. Corrige cualquier cantidad dudosa antes de confirmar.</p>
+
+      <div class="review-angle-tabs hidden" id="food-review-angle-tabs"></div>
 
       <div class="review-photo hidden" id="food-review-photo">
         <img id="food-review-image" alt="Plato analizado con regiones detectadas">
@@ -360,6 +379,7 @@
 
       <p class="form-help" id="food-review-assumptions"></p>
       <button class="primary-button" type="submit">Guardar plato</button>
+      <button class="text-button danger hidden" id="delete-reviewed-food" type="button">Eliminar registro completo</button>
       <button class="text-button close-food-review" type="button">Volver sin guardar</button>
     </form>
   </dialog>
